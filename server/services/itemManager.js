@@ -7,6 +7,7 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { deepCopy } from '../utils/common.js';
 import {
   upsertItem,
   getItemById,
@@ -129,7 +130,7 @@ function processAndStoreItem(itemID, marketInfo, itemInfo) {
   const lastUpdate = Date.now();
 
   // Create a deep copy of marketInfo to avoid reference issues
-  const marketDataCopy = JSON.parse(JSON.stringify(marketInfo));
+  const marketDataCopy = deepCopy(marketInfo);
   marketDataCopy.hasData = marketInfo.hasData;
   
   const itemData = {
@@ -252,7 +253,7 @@ function getItem(itemID) {
   const item = getItemById(itemID);
   if (item) {
     // Return a copy to avoid reference issues
-    return JSON.parse(JSON.stringify(item));
+    return deepCopy(item);
   }
   
   // If not in database, check if it exists in itemList and return with NA values

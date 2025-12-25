@@ -10,6 +10,7 @@
  */
 
 import { logApiCallStart, logApiCallSuccess, logApiCallError, logDelay, logBatchProgress } from './logger.js';
+import { delay, buildQueryString } from '../utils/common.js';
 
 // API base URL - Universalis API already supports CORS (access-control-allow-origin: *)
 // In development, can use proxy (/api/v2) or direct API (https://universalis.app/api/v2)
@@ -49,17 +50,15 @@ async function fetchMarketData(itemIDs, worldName = null, listingsLimit = null, 
     : `${UNIVERSALIS_API_BASE}/${itemIDsString}`;
 
   // Add query parameters for limiting results
-  const queryParams = [];
+  const params = {};
   if (listingsLimit !== null && listingsLimit !== undefined) {
-    queryParams.push(`listings=${listingsLimit}`);
+    params.listings = listingsLimit;
   }
   if (entriesLimit !== null && entriesLimit !== undefined) {
-    queryParams.push(`entries=${entriesLimit}`);
+    params.entries = entriesLimit;
   }
   
-  if (queryParams.length > 0) {
-    url += '?' + queryParams.join('&');
-  }
+  url += buildQueryString(params);
 
   const startTime = Date.now();
   
@@ -165,7 +164,6 @@ function parseItemData(itemData) {
   return {
     itemID: itemData.itemID,
     hasData: true,
-    
     // Current listings
     listings: itemData.listings || [],
     listingsCount: itemData.listingsCount || 0,
@@ -209,15 +207,6 @@ function parseItemData(itemData) {
     dcName: itemData.dcName || null,
     worldUploadTimes: itemData.worldUploadTimes || {},
   };
-}
-
-/**
- * Delay function to wait between API calls
- * @param {number} ms - Milliseconds to wait
- * @returns {Promise<void>}
- */
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
