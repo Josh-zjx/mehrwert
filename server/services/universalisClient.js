@@ -4,6 +4,8 @@
  * Handles API calls to Universalis with global rate limiting
  */
 
+import { delay, buildQueryString } from '../utils/common.js';
+
 const UNIVERSALIS_API_BASE = 'https://universalis.app/api/v2';
 const MAX_ITEMS_PER_CALL = 5;
 const BASE_DELAY_BETWEEN_CALLS_MS = 1000; // Base 1 second delay
@@ -65,7 +67,7 @@ class UniversalisRequestQueue {
 
         if (timeSinceLastRequest < requiredDelay) {
           const waitTime = requiredDelay - timeSinceLastRequest;
-          await this.delay(waitTime);
+          await delay(waitTime);
         }
 
         // Execute the request
@@ -79,15 +81,6 @@ class UniversalisRequestQueue {
     }
 
     this.processing = false;
-  }
-
-  /**
-   * Delay function
-   * @param {number} ms - Milliseconds to wait
-   * @returns {Promise<void>}
-   */
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
@@ -117,19 +110,17 @@ async function fetchMarketData(itemIDs, worldName = 'China', listingsLimit = 5, 
   let url = `${UNIVERSALIS_API_BASE}/${worldName}/${itemIDsString}`;
 
   // Add query parameters
-  const queryParams = [];
+  const params = {};
   if (listingsLimit !== null && listingsLimit !== undefined) {
-    queryParams.push(`listings=${listingsLimit}`);
+    params.listings = listingsLimit;
   }
   if (entriesLimit !== null && entriesLimit !== undefined) {
-    queryParams.push(`entries=${entriesLimit}`);
+    params.entries = entriesLimit;
   }
   // Always include entriesWithin to limit history to last 7 days
-  queryParams.push(`entriesWithin=${ENTRIES_WITHIN_SECONDS}`);
+  params.entriesWithin = ENTRIES_WITHIN_SECONDS;
 
-  if (queryParams.length > 0) {
-    url += '?' + queryParams.join('&');
-  }
+  url += buildQueryString(params);
 
   // Enqueue the request through global rate limiter
   return requestQueue.enqueue(async () => {

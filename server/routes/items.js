@@ -5,6 +5,7 @@
  */
 
 import express from 'express';
+import { handleApiError } from '../utils/common.js';
 import {
   getItem,
   getAllItems,
@@ -36,10 +37,7 @@ router.get('/', (req, res) => {
       items,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    handleApiError(res, error);
   }
 });
 
@@ -72,10 +70,7 @@ router.get('/:id', (req, res) => {
       item,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    handleApiError(res, error);
   }
 });
 
@@ -105,10 +100,7 @@ router.get('/batch/:ids', (req, res) => {
       items,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    handleApiError(res, error);
   }
 });
 

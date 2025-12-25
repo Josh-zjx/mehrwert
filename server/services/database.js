@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { parseDbRow } from '../utils/common.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -187,16 +188,17 @@ export function getItemById(itemID) {
       return null;
     }
 
-    // Parse JSON fields
+    // Parse JSON fields using utility function
+    const parsed = parseDbRow(row, ['number', 'req', 'marketData']);
     return {
-      id: row.id,
-      name: row.name,
-      number: JSON.parse(row.number || '[]'),
-      req: JSON.parse(row.req || '[]'),
-      marketData: JSON.parse(row.marketData || '{}'),
-      classification: row.classification,
-      lastUpdate: row.lastUpdate,
-      nextUpdate: row.nextUpdate,
+      id: parsed.id,
+      name: parsed.name,
+      number: parsed.number,
+      req: parsed.req,
+      marketData: parsed.marketData,
+      classification: parsed.classification,
+      lastUpdate: parsed.lastUpdate,
+      nextUpdate: parsed.nextUpdate,
     };
   }, null);
 }
@@ -210,16 +212,19 @@ export function getAllItems() {
     const stmt = db.prepare('SELECT * FROM items');
     const rows = stmt.all();
     
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      number: JSON.parse(row.number || '[]'),
-      req: JSON.parse(row.req || '[]'),
-      marketData: JSON.parse(row.marketData || '{}'),
-      classification: row.classification,
-      lastUpdate: row.lastUpdate,
-      nextUpdate: row.nextUpdate,
-    }));
+    return rows.map(row => {
+      const parsed = parseDbRow(row, ['number', 'req', 'marketData']);
+      return {
+        id: parsed.id,
+        name: parsed.name,
+        number: parsed.number,
+        req: parsed.req,
+        marketData: parsed.marketData,
+        classification: parsed.classification,
+        lastUpdate: parsed.lastUpdate,
+        nextUpdate: parsed.nextUpdate,
+      };
+    });
   }, []);
 }
 
@@ -233,16 +238,19 @@ export function getItemsByClassification(classification) {
     const stmt = db.prepare('SELECT * FROM items WHERE classification = ?');
     const rows = stmt.all(classification);
     
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      number: JSON.parse(row.number || '[]'),
-      req: JSON.parse(row.req || '[]'),
-      marketData: JSON.parse(row.marketData || '{}'),
-      classification: row.classification,
-      lastUpdate: row.lastUpdate,
-      nextUpdate: row.nextUpdate,
-    }));
+    return rows.map(row => {
+      const parsed = parseDbRow(row, ['number', 'req', 'marketData']);
+      return {
+        id: parsed.id,
+        name: parsed.name,
+        number: parsed.number,
+        req: parsed.req,
+        marketData: parsed.marketData,
+        classification: parsed.classification,
+        lastUpdate: parsed.lastUpdate,
+        nextUpdate: parsed.nextUpdate,
+      };
+    });
   }, []);
 }
 
