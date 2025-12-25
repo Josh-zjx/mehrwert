@@ -12,11 +12,22 @@ const expandedCards = ref({
   cold: false,
 });
 
+// Track which classifications have been loaded
+const loadedClassifications = ref(new Set(['hot'])); // Hot is loaded by default
+
+// Track loading state per classification
+const loadingClassifications = ref({
+  hot: false,
+  mild: false,
+  cold: false,
+});
+
 // Track expanded listings for each item
 const expandedListings = ref({});
 
 const formatPrice = (price) => {
-  if (!price || price === 0) return 'N/A';
+  if (price === 'NA' || price === null || price === undefined || price === 0) return 'N/A';
+  if (typeof price === 'string') return price; // Return string values as-is (e.g., "NA")
   return price.toLocaleString('en-US');
 };
 
@@ -25,15 +36,18 @@ const formatDate = (timestamp) => {
   return new Date(timestamp).toLocaleString();
 };
 
-// Organize items by classification and sort by saleVelocity
+// Organize items by classification and sort by unitsSold
 const organizedItems = computed(() => {
   const hot = [];
   const mild = [];
   const cold = [];
 
   items.value.forEach(item => {
-    // Extract saleVelocity from marketData structure (backend returns raw Universalis API response)
-    const saleVelocity = item.marketData?.regularSaleVelocity || 0;
+    // Extract saleVelocity from marketData structure
+    // Use unitsSold as velocity
+    const rawVelocity = item.marketData?.unitsSold;
+    // Handle "NA" values - treat as 0 for sorting purposes
+    const saleVelocity = (rawVelocity === 'NA' || rawVelocity === null || rawVelocity === undefined) ? 0 : rawVelocity;
     const itemWithVelocity = {
       ...item,
       saleVelocity,
@@ -52,7 +66,7 @@ const organizedItems = computed(() => {
     }
   });
 
-  // Sort by saleVelocity in decreasing order
+  // Sort by unitsSold in decreasing order
   const sortByVelocity = (a, b) => b.saleVelocity - a.saleVelocity;
 
   return {
@@ -62,12 +76,44 @@ const organizedItems = computed(() => {
   };
 });
 
-const toggleCard = (classification) => {
+const toggleCard = async (classification) => {
+  const wasExpanded = expandedCards.value[classification];
   expandedCards.value[classification] = !expandedCards.value[classification];
+  
+  // If expanding and not yet loaded, fetch items for this classification
+  if (expandedCards.value[classification] && !loadedClassifications.value.has(classification)) {
+    await loadClassificationData(classification);
+  }
 };
 
 const toggleListings = (itemID) => {
   expandedListings.value[itemID] = !expandedListings.value[itemID];
+};
+
+const loadClassificationData = async (classification) => {
+  // Skip if already loaded
+  if (loadedClassifications.value.has(classification)) {
+    return;
+  }
+
+  loadingClassifications.value[classification] = true;
+  error.value = null;
+
+  try {
+    const itemsData = await fetchAllItems(classification);
+    
+    // Merge new items with existing items (avoid duplicates)
+    const existingIds = new Set(items.value.map(item => item.id));
+    const newItems = itemsData.filter(item => !existingIds.has(item.id));
+    items.value = [...items.value, ...newItems];
+    
+    loadedClassifications.value.add(classification);
+  } catch (err) {
+    error.value = err.message || `Failed to load ${classification} items from backend`;
+    console.error(`Error loading ${classification} items:`, err);
+  } finally {
+    loadingClassifications.value[classification] = false;
+  }
 };
 
 const loadMarketData = async () => {
@@ -75,13 +121,15 @@ const loadMarketData = async () => {
   error.value = null;
 
   try {
-    const [itemsData, statsData] = await Promise.all([
-      fetchAllItems(),
+    // Load stats and hot items immediately (hot card is expanded by default)
+    const [hotItemsData, statsData] = await Promise.all([
+      fetchAllItems('hot'),
       fetchStats(),
     ]);
 
-    items.value = itemsData;
+    items.value = hotItemsData;
     stats.value = statsData;
+    loadedClassifications.value.add('hot');
   } catch (err) {
     error.value = err.message || 'Failed to load market data from backend';
     console.error('Error loading market data:', err);
@@ -141,7 +189,7 @@ onMounted(() => {
             <span class="classification-badge hot-badge">Hot</span>
             <span class="card-count">({{ organizedItems.hot.length }} items)</span>
           </div>
-          <div class="card-subtitle">Updated every minute • Sale Velocity ≥ 500</div>
+          <div class="card-subtitle">Updated every minute • Units Sold ≥ 1000</div>
           <span class="card-toggle">{{ expandedCards.hot ? '▼' : '▶' }}</span>
         </div>
         <div v-if="expandedCards.hot" class="card-content">
@@ -171,14 +219,16 @@ onMounted(() => {
                 <span class="item-id">ID: {{ item.id }}</span>
               </div>
 
-              <div v-if="!item.marketData || !item.marketData.hasData" class="no-market-data">
+              <div v-if="!item.marketData" class="no-market-data">
                 No market data available
               </div>
 
               <div v-else class="market-info">
                 <div class="sale-velocity-badge">
-                  <span class="velocity-label">Sale Velocity:</span>
-                  <span class="velocity-value">{{ item.saleVelocity.toFixed(2) }}/day</span>
+                  <span class="velocity-label">Units Sold:</span>
+                  <span class="velocity-value">
+                    {{ item.marketData?.unitsSold === 'NA' || item.marketData?.unitsSold === null || item.marketData?.unitsSold === undefined || !item.marketData?.hasData ? 'N/A' : item.saleVelocity.toFixed(0) }}
+                  </span>
                 </div>
 
                 <div class="price-section">
@@ -199,11 +249,11 @@ onMounted(() => {
                   </div>
                   <div class="stat">
                     <span class="stat-label">For Sale:</span>
-                    <span class="stat-value">{{ item.marketData.unitsForSale }}</span>
+                    <span class="stat-value">{{ item.marketData.unitsForSale === 'NA' ? 'N/A' : item.marketData.unitsForSale }}</span>
                   </div>
                   <div class="stat">
                     <span class="stat-label">Sold:</span>
-                    <span class="stat-value">{{ item.marketData.unitsSold }}</span>
+                    <span class="stat-value">{{ item.marketData.unitsSold === 'NA' ? 'N/A' : item.marketData.unitsSold }}</span>
                   </div>
                 </div>
 
@@ -243,11 +293,14 @@ onMounted(() => {
             <span class="classification-badge mild-badge">Mild</span>
             <span class="card-count">({{ organizedItems.mild.length }} items)</span>
           </div>
-          <div class="card-subtitle">Updated every hour • Sale Velocity 100-499</div>
+          <div class="card-subtitle">Updated every hour • Units Sold 100-999</div>
           <span class="card-toggle">{{ expandedCards.mild ? '▼' : '▶' }}</span>
         </div>
         <div v-if="expandedCards.mild" class="card-content">
-          <div v-if="organizedItems.mild.length === 0" class="no-items">
+          <div v-if="loadingClassifications.mild" class="loading-items">
+            Loading mild items...
+          </div>
+          <div v-else-if="organizedItems.mild.length === 0" class="no-items">
             No mild items found
           </div>
           <div v-else class="items-grid">
@@ -273,14 +326,16 @@ onMounted(() => {
                 <span class="item-id">ID: {{ item.id }}</span>
               </div>
 
-              <div v-if="!item.marketData || !item.marketData.hasData" class="no-market-data">
+              <div v-if="!item.marketData" class="no-market-data">
                 No market data available
               </div>
 
               <div v-else class="market-info">
                 <div class="sale-velocity-badge">
-                  <span class="velocity-label">Sale Velocity:</span>
-                  <span class="velocity-value">{{ item.saleVelocity.toFixed(2) }}/day</span>
+                  <span class="velocity-label">Units Sold:</span>
+                  <span class="velocity-value">
+                    {{ item.marketData?.unitsSold === 'NA' || item.marketData?.unitsSold === null || item.marketData?.unitsSold === undefined || !item.marketData?.hasData ? 'N/A' : item.saleVelocity.toFixed(0) }}
+                  </span>
                 </div>
 
                 <div class="price-section">
@@ -301,11 +356,11 @@ onMounted(() => {
                   </div>
                   <div class="stat">
                     <span class="stat-label">For Sale:</span>
-                    <span class="stat-value">{{ item.marketData.unitsForSale }}</span>
+                    <span class="stat-value">{{ item.marketData.unitsForSale === 'NA' ? 'N/A' : item.marketData.unitsForSale }}</span>
                   </div>
                   <div class="stat">
                     <span class="stat-label">Sold:</span>
-                    <span class="stat-value">{{ item.marketData.unitsSold }}</span>
+                    <span class="stat-value">{{ item.marketData.unitsSold === 'NA' ? 'N/A' : item.marketData.unitsSold }}</span>
                   </div>
                 </div>
 
@@ -345,11 +400,14 @@ onMounted(() => {
             <span class="classification-badge cold-badge">Cold</span>
             <span class="card-count">({{ organizedItems.cold.length }} items)</span>
           </div>
-          <div class="card-subtitle">Updated daily • Sale Velocity &lt; 100</div>
+          <div class="card-subtitle">Updated daily • Units Sold &lt; 100</div>
           <span class="card-toggle">{{ expandedCards.cold ? '▼' : '▶' }}</span>
         </div>
         <div v-if="expandedCards.cold" class="card-content">
-          <div v-if="organizedItems.cold.length === 0" class="no-items">
+          <div v-if="loadingClassifications.cold" class="loading-items">
+            Loading cold items...
+          </div>
+          <div v-else-if="organizedItems.cold.length === 0" class="no-items">
             No cold items found
           </div>
           <div v-else class="items-grid">
@@ -375,14 +433,16 @@ onMounted(() => {
                 <span class="item-id">ID: {{ item.id }}</span>
               </div>
 
-              <div v-if="!item.marketData || !item.marketData.hasData" class="no-market-data">
+              <div v-if="!item.marketData" class="no-market-data">
                 No market data available
               </div>
 
               <div v-else class="market-info">
                 <div class="sale-velocity-badge">
-                  <span class="velocity-label">Sale Velocity:</span>
-                  <span class="velocity-value">{{ item.saleVelocity.toFixed(2) }}/day</span>
+                  <span class="velocity-label">Units Sold:</span>
+                  <span class="velocity-value">
+                    {{ item.marketData?.unitsSold === 'NA' || item.marketData?.unitsSold === null || item.marketData?.unitsSold === undefined || !item.marketData?.hasData ? 'N/A' : item.saleVelocity.toFixed(0) }}
+                  </span>
                 </div>
 
                 <div class="price-section">
@@ -403,11 +463,11 @@ onMounted(() => {
                   </div>
                   <div class="stat">
                     <span class="stat-label">For Sale:</span>
-                    <span class="stat-value">{{ item.marketData.unitsForSale }}</span>
+                    <span class="stat-value">{{ item.marketData.unitsForSale === 'NA' ? 'N/A' : item.marketData.unitsForSale }}</span>
                   </div>
                   <div class="stat">
                     <span class="stat-label">Sold:</span>
-                    <span class="stat-value">{{ item.marketData.unitsSold }}</span>
+                    <span class="stat-value">{{ item.marketData.unitsSold === 'NA' ? 'N/A' : item.marketData.unitsSold }}</span>
                   </div>
                 </div>
 
@@ -654,6 +714,13 @@ onMounted(() => {
   color: #999;
   padding: 2rem;
   font-style: italic;
+}
+
+.loading-items {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+  font-weight: 500;
 }
 
 .items-grid {

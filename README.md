@@ -7,8 +7,8 @@ This codebase is ***completely*** generated using ***Vibe Coding*** with Cursor 
 ## Features
 
 - **Intelligent Item Classification**: Items are automatically classified based on sale velocity:
-  - **Hot**: saleVelocity ≥ 500 (updated every minute)
-  - **Mild**: saleVelocity < 500 (updated every hour)
+  - **Hot**: saleVelocity ≥ 1000 (updated every minute)
+  - **Mild**: saleVelocity < 1000 (updated every hour)
   - **Cold**: saleVelocity < 100 (updated once per day)
 
 - **Organized Display**: Items are displayed in collapsible cards grouped by classification, sorted by sale velocity
@@ -215,8 +215,8 @@ For detailed API documentation, see [server/README.md](./server/README.md).
 ## Rate Limiting
 
 The backend respects Universalis API limits:
-- Maximum 10 item IDs per API call
-- 1 second delay between API calls
+- Maximum 5 item IDs per API call
+- 1-1.5 second randomized delay between API calls (base 1s + random 0-500ms)
 - Batches large requests automatically
 
 ## Troubleshooting

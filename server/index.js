@@ -5,13 +5,13 @@
  */
 
 import express from 'express';
-import cron from 'node-cron';
 import {
   initializeItems,
   updateItems,
   getItemsNeedingUpdate,
   getAllItems,
   getItemsByClassification,
+  getItem,
   HOT_UPDATE_INTERVAL,
   MILD_UPDATE_INTERVAL,
   COLD_UPDATE_INTERVAL,
@@ -85,89 +85,64 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
+// Debug endpoint to check store state
+app.get('/api/debug/store', (req, res) => {
+  try {
+    const sampleItemIDs = [32953, 32950, 29978];
+    const debugInfo = sampleItemIDs.map(itemID => {
+      const item = getItem(itemID);
+      return {
+        itemID,
+        exists: item !== null,
+        unitsSold: item?.marketData?.unitsSold,
+        unitsSoldType: typeof item?.marketData?.unitsSold,
+        hasData: item?.marketData?.hasData,
+        classification: item?.classification,
+        lastUpdate: item?.lastUpdate,
+        nextUpdate: item?.nextUpdate,
+        isNA: item?.marketData?.unitsSold === 'NA' || item?.marketData?.unitsSold === null || item?.marketData?.unitsSold === undefined,
+      };
+    });
+    
+    res.json({
+      success: true,
+      debug: debugInfo,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 /**
  * Update items based on their classification
  */
 async function performScheduledUpdate() {
-  console.log(`[Scheduler] Starting scheduled update...`);
   const itemsToUpdate = getItemsNeedingUpdate();
+  const allItems = [...itemsToUpdate.hot, ...itemsToUpdate.mild, ...itemsToUpdate.cold];
 
-  const totalItems = itemsToUpdate.hot.length + itemsToUpdate.mild.length + itemsToUpdate.cold.length;
-
-  if (totalItems === 0) {
-    console.log(`[Scheduler] No items need updating`);
+  if (allItems.length === 0) {
     return;
   }
 
-  console.log(`[Scheduler] Items to update - Hot: ${itemsToUpdate.hot.length}, Mild: ${itemsToUpdate.mild.length}, Cold: ${itemsToUpdate.cold.length}`);
-
-  // Update hot items
-  if (itemsToUpdate.hot.length > 0) {
-    try {
-      await updateItems(itemsToUpdate.hot, WORLD_NAME);
-    } catch (error) {
-      console.error(`[Scheduler] Error updating hot items:`, error.message);
-    }
+  try {
+    await updateItems(allItems, WORLD_NAME);
+  } catch (error) {
+    console.error(`[Scheduler] Error updating items:`, error.message);
   }
-
-  // Update mild items
-  if (itemsToUpdate.mild.length > 0) {
-    try {
-      await updateItems(itemsToUpdate.mild, WORLD_NAME);
-    } catch (error) {
-      console.error(`[Scheduler] Error updating mild items:`, error.message);
-    }
-  }
-
-  // Update cold items
-  if (itemsToUpdate.cold.length > 0) {
-    try {
-      await updateItems(itemsToUpdate.cold, WORLD_NAME);
-    } catch (error) {
-      console.error(`[Scheduler] Error updating cold items:`, error.message);
-    }
-  }
-
-  console.log(`[Scheduler] Scheduled update complete`);
 }
 
-// Schedule updates
-// Hot items: every minute
-cron.schedule('* * * * *', () => {
-  const itemsToUpdate = getItemsNeedingUpdate();
-  if (itemsToUpdate.hot.length > 0) {
-    performScheduledUpdate();
-  }
-});
-
-// Mild items: every hour
-cron.schedule('0 * * * *', () => {
-  const itemsToUpdate = getItemsNeedingUpdate();
-  if (itemsToUpdate.mild.length > 0) {
-    performScheduledUpdate();
-  }
-});
-
-// Cold items: every day at midnight
-cron.schedule('0 0 * * *', () => {
-  const itemsToUpdate = getItemsNeedingUpdate();
-  if (itemsToUpdate.cold.length > 0) {
-    performScheduledUpdate();
-  }
-});
-
-// Also run continuous check every minute for items that need updating
+// Schedule updates - check every minute for items that need updating
 setInterval(() => {
   performScheduledUpdate();
-}, 60000); // Check every minute
+}, 60000);
 
 // Start server
-async function startServer() {
+function startServer() {
   try {
-    console.log(`[Server] Initializing items...`);
-    await initializeItems(WORLD_NAME);
-    console.log(`[Server] Items initialized`);
-
+    // Start the server immediately (no NA initialization)
     app.listen(PORT, () => {
       console.log(`[Server] Server running on http://localhost:${PORT}`);
       console.log(`[Server] World/DC: ${WORLD_NAME}`);
@@ -177,7 +152,12 @@ async function startServer() {
       console.log(`[Server]   GET /api/items/batch/:ids - Get multiple items`);
       console.log(`[Server]   GET /api/stats - Get server statistics`);
       console.log(`[Server]   GET /health - Health check`);
+      console.log(`[Server] API is now available. Fetching market data in background...`);
     });
+
+    // Start background fetching (non-blocking)
+    // This will populate the store as data is fetched
+    initializeItems(WORLD_NAME);
   } catch (error) {
     console.error(`[Server] Failed to start:`, error);
     process.exit(1);

@@ -34,3 +34,9 @@ coverage
 
 # Vitest
 __screenshots__/
+
+# Database
+data/
+*.db
+*.db-shm
+*.db-wal

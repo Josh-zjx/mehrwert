@@ -6,14 +6,14 @@ Backend server for managing Universalis API data with intelligent update schedul
 
 - **Item Classification**: Automatically classifies items based on sale velocity:
   - **Cold**: saleVelocity < 100 (updated once per day)
-  - **Mild**: saleVelocity < 500 (updated once per hour)
-  - **Hot**: saleVelocity >= 500 (updated once per minute)
+  - **Mild**: saleVelocity < 1000 (updated once per hour)
+  - **Hot**: saleVelocity >= 1000 (updated once per minute)
 
 - **Intelligent Updates**: Items are updated based on their classification to optimize API usage
 
 - **Rate Limiting**: 
-  - Maximum 10 item IDs per API call
-  - 1 second delay between API calls
+  - Maximum 5 item IDs per API call
+  - 1-1.5 second randomized delay between API calls (base 1s + random 0-500ms)
 
 - **RESTful API**: Provides endpoints to query item data
 
