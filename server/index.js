@@ -5,6 +5,7 @@
  */
 
 import express from 'express';
+import { handleApiError } from './utils/common.js';
 import {
   initializeItems,
   updateItems,
@@ -78,10 +79,7 @@ app.get('/api/stats', (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    handleApiError(res, error);
   }
 });
 
@@ -109,10 +107,7 @@ app.get('/api/debug/store', (req, res) => {
       debug: debugInfo,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    handleApiError(res, error);
   }
 });
 

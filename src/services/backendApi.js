@@ -7,28 +7,38 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
 /**
- * Fetch all items from backend
- * @param {string} classification - Optional classification filter ('hot', 'mild', 'cold')
- * @returns {Promise<Array>} Array of items
+ * Helper function to make API requests with consistent error handling
+ * @param {string} url - URL to fetch
+ * @param {string} errorContext - Context for error message
+ * @returns {Promise<Object>} Response data
  */
-export async function fetchAllItems(classification = null) {
+async function apiRequest(url, errorContext) {
   try {
-    const url = classification 
-      ? `${API_BASE_URL}/api/items?classification=${classification}`
-      : `${API_BASE_URL}/api/items`;
-    
     const response = await fetch(url);
     
     if (!response.ok) {
       throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
     }
     
-    const data = await response.json();
-    return data.items || [];
+    return await response.json();
   } catch (error) {
-    console.error('Error fetching items from backend:', error);
+    console.error(`Error ${errorContext}:`, error);
     throw error;
   }
+}
+
+/**
+ * Fetch all items from backend
+ * @param {string} classification - Optional classification filter ('hot', 'mild', 'cold')
+ * @returns {Promise<Array>} Array of items
+ */
+export async function fetchAllItems(classification = null) {
+  const url = classification 
+    ? `${API_BASE_URL}/api/items?classification=${classification}`
+    : `${API_BASE_URL}/api/items`;
+  
+  const data = await apiRequest(url, 'fetching items from backend');
+  return data.items || [];
 }
 
 /**
@@ -37,19 +47,11 @@ export async function fetchAllItems(classification = null) {
  * @returns {Promise<Object>} Item data
  */
 export async function fetchItemById(itemID) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/items/${itemID}`);
-    
-    if (!response.ok) {
-      throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    return data.item;
-  } catch (error) {
-    console.error('Error fetching item from backend:', error);
-    throw error;
-  }
+  const data = await apiRequest(
+    `${API_BASE_URL}/api/items/${itemID}`, 
+    'fetching item from backend'
+  );
+  return data.item;
 }
 
 /**
@@ -58,20 +60,12 @@ export async function fetchItemById(itemID) {
  * @returns {Promise<Array>} Array of items
  */
 export async function fetchItemsByIds(itemIDs) {
-  try {
-    const idsString = itemIDs.join(',');
-    const response = await fetch(`${API_BASE_URL}/api/items/batch/${idsString}`);
-    
-    if (!response.ok) {
-      throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    return data.items || [];
-  } catch (error) {
-    console.error('Error fetching items from backend:', error);
-    throw error;
-  }
+  const idsString = itemIDs.join(',');
+  const data = await apiRequest(
+    `${API_BASE_URL}/api/items/batch/${idsString}`, 
+    'fetching items from backend'
+  );
+  return data.items || [];
 }
 
 /**
@@ -79,19 +73,7 @@ export async function fetchItemsByIds(itemIDs) {
  * @returns {Promise<Object>} Server statistics
  */
 export async function fetchStats() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/stats`);
-    
-    if (!response.ok) {
-      throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching stats from backend:', error);
-    throw error;
-  }
+  return await apiRequest(`${API_BASE_URL}/api/stats`, 'fetching stats from backend');
 }
 
 /**
@@ -99,16 +81,5 @@ export async function fetchStats() {
  * @returns {Promise<Object>} Health status
  */
 export async function checkHealth() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/health`);
-    
-    if (!response.ok) {
-      throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error checking backend health:', error);
-    throw error;
-  }
+  return await apiRequest(`${API_BASE_URL}/health`, 'checking backend health');
 }

@@ -63,3 +63,17 @@ export function parseDbRow(row, jsonFields = []) {
   
   return parsed;
 }
+
+/**
+ * Handle API errors consistently in Express routes
+ * @param {Object} res - Express response object
+ * @param {Error} error - Error object
+ * @param {number} statusCode - HTTP status code (default: 500)
+ */
+export function handleApiError(res, error, statusCode = 500) {
+  res.status(statusCode).json({
+    success: false,
+    error: error.message,
+  });
+}
+
