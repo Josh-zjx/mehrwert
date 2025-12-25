@@ -23,7 +23,7 @@ export function buildQueryString(params) {
   
   for (const [key, value] of Object.entries(params)) {
     if (value !== null && value !== undefined) {
-      queryParams.push(`${key}=${value}`);
+      queryParams.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
     }
   }
   

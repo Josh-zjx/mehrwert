@@ -32,7 +32,7 @@ export function buildQueryString(params) {
   
   for (const [key, value] of Object.entries(params)) {
     if (value !== null && value !== undefined) {
-      queryParams.push(`${key}=${value}`);
+      queryParams.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
     }
   }
   
@@ -53,10 +53,13 @@ export function parseDbRow(row, jsonFields = []) {
   for (const field of jsonFields) {
     if (row[field] !== undefined) {
       try {
-        parsed[field] = JSON.parse(row[field] || (Array.isArray(parsed[field]) ? '[]' : '{}'));
+        // Determine default based on field name pattern (arrays typically use 'number', 'req', etc.)
+        const defaultValue = (field === 'number' || field === 'req') ? '[]' : '{}';
+        parsed[field] = JSON.parse(row[field] || defaultValue);
       } catch (error) {
         console.error(`Error parsing JSON field ${field}:`, error);
-        parsed[field] = Array.isArray(parsed[field]) ? [] : {};
+        // Use consistent defaults: arrays for list-like fields, objects for others
+        parsed[field] = (field === 'number' || field === 'req') ? [] : {};
       }
     }
   }
