@@ -135,6 +135,26 @@ describe('ItemMarketDisplay', () => {
     app.unmount();
   });
 
+  it('orders hot items by expected profit, not by velocity', async () => {
+    // Both items are hot; the slower seller has the dearer listing
+    fetchIndex.mockImplementation(async (dc) => ({ ...indexFor(dc), hotLimit: 2 }));
+    fetchMarketDataForIds.mockImplementation(async (ids, opts) => {
+      const items = Object.fromEntries(ids.map(id => [String(id), marketDataFor(id)]));
+      items[String(MILD_ID)].listings[0].pricePerUnit = 500;
+      opts?.onBatch?.(items);
+      return items;
+    });
+
+    const { el, app } = await mount();
+    const text = el.textContent;
+
+    // 50 × 500 = 25,000 beats 50 × 120 = 6,000, so the slower item comes first
+    expect(text.indexOf('香风月桂叶')).toBeLessThan(text.indexOf('西兰花'));
+    expect(text).toContain('25,000 gil');
+    expect(fetchMarketDataForIds).toHaveBeenCalledTimes(1);
+    app.unmount();
+  });
+
   it('defaults to the backend default data center and puts it in the URL', async () => {
     const { app } = await mount();
 

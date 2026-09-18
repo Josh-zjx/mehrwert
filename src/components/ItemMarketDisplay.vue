@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { fetchIndex, fetchDataCenters } from '../services/backendApi.js';
 import { fetchMarketDataForIds, getItemListMap } from '../services/itemMarketService.js';
 import { formatDate, formatNumber, formatRelativeTime } from '../utils/format.js';
+import { byExpectedProfit } from '../utils/profit.js';
 import ClassificationSection from './ClassificationSection.vue';
 import FloatingHeader from './FloatingHeader.vue';
 import { useTheme } from '../composables/useTheme.js';
@@ -84,6 +85,11 @@ const organizedItems = computed(() => {
       groups.cold.push(item);
     }
   });
+
+  // Hot is the list people act on, so it is ordered by what selling pays. The
+  // backend's velocity ranking still decides membership (and the rank shown on
+  // each card); mild and cold keep that order as-is. Reorders live as prices land.
+  groups.hot.sort(byExpectedProfit);
 
   return groups;
 });
@@ -379,6 +385,7 @@ onUnmounted(() => {
         :label="LABELS[c]"
         :subtitle="subtitle(c)"
         :items="organizedItems[c]"
+        :note="c === 'hot' ? 'sorted by expected profit' : ''"
         :expanded="expandedCards[c]"
         :loading="loadingClassifications[c]"
         :progress="progress[c]"

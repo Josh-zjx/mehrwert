@@ -6,6 +6,8 @@ const props = defineProps({
   classification: { type: String, required: true },
   label: { type: String, required: true },
   subtitle: { type: String, default: '' },
+  /** Small remark after the item count, e.g. how the list is ordered */
+  note: { type: String, default: '' },
   items: { type: Array, required: true },
   expanded: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
@@ -29,7 +31,7 @@ const panelId = `${props.classification}-items`;
     >
       <span class="badge">{{ label }}</span>
       <span class="subtitle">{{ subtitle }}</span>
-      <span class="count">{{ items.length }} items</span>
+      <span class="count">{{ items.length }} items<template v-if="note"> · {{ note }}</template></span>
       <span class="spacer" />
       <span v-if="loading" class="status">Fetching prices from Universalis… {{ progress }}%</span>
       <span v-else-if="!expanded" class="status faint">Loads when opened</span>

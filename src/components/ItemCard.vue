@@ -8,6 +8,7 @@ import {
   formatRelativeTime,
   formatVelocity,
 } from '../utils/format.js';
+import { cheapestListing, expectedProfit as profitOf } from '../utils/profit.js';
 
 const LISTINGS_SHOWN = 5;
 
@@ -34,15 +35,8 @@ const listings = computed(() => market.value?.listings?.slice(0, LISTINGS_SHOWN)
 
 // What selling the item's full quantity would bring in at the cheapest listing
 // currently on the board. Nothing to sell against means no estimate.
-const cheapest = computed(() => {
-  const prices = listings.value.map(l => l.pricePerUnit).filter(p => p > 0);
-  return prices.length ? Math.min(...prices) : null;
-});
-
-const expectedProfit = computed(() => {
-  if (!props.item.quantity || cheapest.value === null) return null;
-  return props.item.quantity * cheapest.value;
-});
+const cheapest = computed(() => cheapestListing(market.value));
+const expectedProfit = computed(() => profitOf(props.item));
 
 const facts = computed(() => [
   { label: 'Min', value: formatPrice(market.value?.prices.min), unit: 'gil' },
