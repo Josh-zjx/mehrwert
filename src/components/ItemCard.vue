@@ -131,18 +131,18 @@ const facts = computed(() => [
   gap: 14px;
   padding: 20px 22px;
   background: var(--surface);
-  border: 1px solid var(--hairline);
   border-radius: var(--radius-card);
-  transition: border-color 0.2s;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.2s;
 }
 
 .card:hover {
-  border-color: var(--line);
+  transform: translateY(-2px);
 }
 
 .card.empty {
-  border-style: dashed;
-  border-color: var(--line);
+  border: 2px dashed var(--line);
+  box-shadow: none;
   color: var(--muted);
 }
 
@@ -162,7 +162,7 @@ const facts = computed(() => [
   flex: 1;
   min-width: 0;
   font-size: 17px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.3;
   color: var(--ink);
   overflow-wrap: anywhere;
@@ -194,7 +194,7 @@ const facts = computed(() => [
 .velocity-value {
   font-family: var(--font-display);
   font-size: 36px;
-  font-weight: 500;
+  font-weight: 800;
   line-height: 1;
   letter-spacing: -0.02em;
 }
@@ -223,16 +223,14 @@ const facts = computed(() => [
 }
 
 .fact dt {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 700;
   color: var(--muted);
 }
 
 .fact dd {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .unit {
@@ -263,7 +261,7 @@ const facts = computed(() => [
   min-height: 32px;
   padding: 0 4px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 700;
   background: transparent;
   border: 0;
   border-radius: 6px;
@@ -296,11 +294,9 @@ const facts = computed(() => [
 
 .listings th {
   padding: 4px 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  font-weight: 700;
   text-align: left;
-  text-transform: uppercase;
   color: var(--muted);
 }
 

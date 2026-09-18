@@ -1,5 +1,5 @@
-/* Design tokens. A warm paper ground, one ink, and three class hues that share
-   chroma and lightness so Hot / Mild / Cold read as siblings, not alerts. */
+/* Design tokens. A warm paper ground, one ink, a rounded sans, and three class hues
+   that share chroma and lightness so Hot / Mild / Cold read as siblings, not alerts. */
 :root {
   --ground: #f5f3ee;
   --surface: #ffffff;
@@ -21,13 +21,14 @@
   --danger: #b5320f;
   --danger-tint: #fbe9e1;
 
-  --font-display: Fraunces, Georgia, 'Times New Roman', serif;
   --font-body:
-    'IBM Plex Sans', 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui,
-    sans-serif;
+    Nunito, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-display: var(--font-body);
 
-  --radius-card: 16px;
-  --radius-control: 10px;
+  --shadow-card: 0 1px 2px rgba(27, 26, 23, 0.04), 0 8px 24px -10px rgba(27, 26, 23, 0.16);
+  --radius-card: 22px;
+  --radius-tile: 20px;
+  --radius-control: 999px;
   --page-width: 1440px;
   --page-gutter: clamp(16px, 4vw, 56px);
 }
@@ -44,6 +45,7 @@
     --hairline-soft: #2a2824;
     --line: #3a372f;
     --skeleton: #2e2c27;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -10px rgba(0, 0, 0, 0.5);
 
     --hot: #f0855f;
     --hot-tint: #3a1f16;
@@ -73,6 +75,7 @@ body {
   background: var(--ground);
   font-family: var(--font-body);
   font-size: 15px;
+  font-weight: 500;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;

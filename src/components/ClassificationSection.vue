@@ -91,9 +91,7 @@ const panelId = `${props.classification}-items`;
 .badge {
   padding: 4px 10px;
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-weight: 700;
   color: var(--class);
   background: var(--class-tint);
   border-radius: 999px;
@@ -102,7 +100,7 @@ const panelId = `${props.classification}-items`;
 .subtitle {
   font-family: var(--font-display);
   font-size: 22px;
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .count,

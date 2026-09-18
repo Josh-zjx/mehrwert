@@ -387,18 +387,16 @@ onUnmounted(() => {
 
 .eyebrow {
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-weight: 700;
   color: var(--muted);
 }
 
 .title {
   font-family: var(--font-display);
   font-size: clamp(32px, 4vw, 40px);
-  font-weight: 500;
+  font-weight: 800;
   line-height: 1.05;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .lede {
@@ -421,9 +419,7 @@ onUnmounted(() => {
 
 .field-label {
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 700;
   color: var(--muted);
 }
 
@@ -437,7 +433,7 @@ onUnmounted(() => {
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b665c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>")
     no-repeat right 14px center;
   background-color: var(--surface);
-  border: 1px solid var(--line);
+  border: 2px solid var(--hairline);
   border-radius: var(--radius-control);
   appearance: none;
   cursor: pointer;
@@ -450,7 +446,7 @@ onUnmounted(() => {
   height: 44px;
   padding: 0 18px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ink-inverse);
   background: var(--ink);
   border: 0;
@@ -480,8 +476,8 @@ onUnmounted(() => {
   gap: 4px;
   padding: 18px 22px;
   background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-radius: 14px;
+  border-radius: var(--radius-tile);
+  box-shadow: var(--shadow-card);
 }
 
 .tile.hot {
@@ -501,9 +497,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 700;
   color: var(--class, var(--muted));
 }
 
@@ -524,7 +518,7 @@ onUnmounted(() => {
 .tile-value {
   font-family: var(--font-display);
   font-size: 30px;
-  font-weight: 500;
+  font-weight: 800;
   line-height: 1.1;
 }
 
@@ -537,7 +531,7 @@ onUnmounted(() => {
   padding: 12px 16px;
   color: var(--danger);
   background: var(--danger-tint);
-  border-radius: var(--radius-control);
+  border-radius: 14px;
 }
 
 .notice {
