@@ -120,7 +120,7 @@ describe('ItemMarketDisplay', () => {
 
     expect(html).toContain('西兰花'); // item name comes from the bundled list
     expect(html).toContain('1,500'); // velocity from the index, not from market data
-    expect(html).toContain('120 gil');
+    expect(el.textContent).toContain('120 gil'); // the unit is set in its own span
 
     // Listings stay collapsed until the user opens them
     expect(html).toContain('Listings (1)');

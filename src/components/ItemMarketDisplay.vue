@@ -2,6 +2,8 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { fetchIndex, fetchDataCenters } from '../services/backendApi.js';
 import { fetchMarketDataForIds, getItemListMap } from '../services/itemMarketService.js';
+import { formatDate, formatNumber, formatRelativeTime } from '../utils/format.js';
+import ClassificationSection from './ClassificationSection.vue';
 
 const CLASSIFICATIONS = ['hot', 'mild', 'cold'];
 const LABELS = { hot: 'Hot', mild: 'Mild', cold: 'Cold' };
@@ -21,28 +23,6 @@ const expandedCards = ref({ hot: true, mild: false, cold: false });
 const loadedClassifications = ref(new Set());
 const loadingClassifications = ref({ hot: false, mild: false, cold: false });
 const progress = ref({ hot: 0, mild: 0, cold: 0 });
-const expandedListings = ref({});
-
-const formatPrice = (price) => {
-  if (price === null || price === undefined || price === 0) return 'N/A';
-  return price.toLocaleString('en-US');
-};
-
-const formatDate = (timestamp) => {
-  if (!timestamp) return 'N/A';
-  return new Date(timestamp).toLocaleString();
-};
-
-const formatNumber = (value) => {
-  if (value === null || value === undefined) return 'N/A';
-  return value.toLocaleString('en-US');
-};
-
-const formatVelocity = (velocity) => {
-  if (velocity === null || velocity === undefined) return 'N/A';
-  if (velocity >= 100) return Math.round(velocity).toLocaleString('en-US');
-  return velocity.toFixed(1);
-};
 
 // Regions in the order Universalis lists them, each with its data centers.
 // Data centers with no recorded sales at all (beta ones) are hidden - they would
@@ -85,9 +65,12 @@ const organizedItems = computed(() => {
     }))
     .sort((a, b) => (b.velocity ?? -1) - (a.velocity ?? -1));
 
-  ranked.forEach((item, rank) => {
+  ranked.forEach((item, position) => {
+    const sells = item.velocity > 0;
+    item.rank = sells ? position + 1 : null;
+
     // An item with no recorded sales is never hot, however few items are indexed
-    if (rank < hotLimit && item.velocity > 0) {
+    if (position < hotLimit && sells) {
       groups.hot.push(item);
     } else if (item.velocity >= mildThreshold) {
       groups.mild.push(item);
@@ -99,13 +82,6 @@ const organizedItems = computed(() => {
   return groups;
 });
 
-const stats = computed(() => ({
-  total: itemsById.size,
-  hot: organizedItems.value.hot.length,
-  mild: organizedItems.value.mild.length,
-  cold: organizedItems.value.cold.length,
-}));
-
 const subtitle = (classification) => {
   if (!index.value) return '';
   const { hotLimit, mildThreshold } = index.value;
@@ -113,6 +89,25 @@ const subtitle = (classification) => {
   if (classification === 'mild') return `≥ ${mildThreshold} sold/day`;
   return `< ${mildThreshold} sold/day`;
 };
+
+// The four summary tiles: the whole list, then one per class
+const summary = computed(() => {
+  if (!index.value) return [];
+
+  const indexNote = index.value.sweeping
+    ? `sweeping ${formatNumber(index.value.indexed)} / ${formatNumber(index.value.total)}`
+    : `index updated ${formatRelativeTime(index.value.updatedAt)}`;
+
+  return [
+    { key: 'total', label: 'Tracked items', value: itemsById.size, note: indexNote },
+    ...CLASSIFICATIONS.map(c => ({
+      key: c,
+      label: LABELS[c],
+      value: organizedItems.value[c].length,
+      note: subtitle(c),
+    })),
+  ];
+});
 
 /**
  * Read the region and data center out of the URL so a page can be bookmarked.
@@ -213,10 +208,6 @@ const toggleCard = async (classification) => {
   }
 };
 
-const toggleListings = (itemID) => {
-  expandedListings.value[itemID] = !expandedListings.value[itemID];
-};
-
 /**
  * Load the index for the selected data center, then the open categories.
  */
@@ -300,706 +291,293 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="item-market-display">
-    <div class="header">
-      <h2>Item Market Information</h2>
-      <div class="controls">
-        <button @click="loadMarketData" :disabled="loading" class="refresh-btn">
-          {{ loading ? 'Loading...' : 'Refresh' }}
+  <div class="market">
+    <header class="page-head">
+      <div class="title-block">
+        <span class="eyebrow">Mehrwert</span>
+        <h1 class="title">Item Market</h1>
+        <p class="lede">
+          Live prices from Universalis. Items ranked by daily sales on the selected data
+          center &mdash; players cannot trade across them.
+        </p>
+      </div>
+
+      <div v-if="regions.length > 0" class="controls">
+        <label class="field">
+          <span class="field-label">Region</span>
+          <select class="select" :value="region" @change="selectRegion($event.target.value)">
+            <option v-for="r in regions" :key="r.name" :value="r.name">{{ r.name }}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Data center</span>
+          <select class="select" :value="dataCenter" @change="selectDataCenter($event.target.value)">
+            <option v-for="dc in dataCentersInRegion" :key="dc.name" :value="dc.name">
+              {{ dc.name }}<template v-if="dc.indexed === 0"> (not indexed yet)</template>
+            </option>
+          </select>
+        </label>
+        <button type="button" class="refresh" :disabled="loading" @click="loadMarketData">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+            <polyline points="21 3 21 9 15 9" />
+          </svg>
+          {{ loading ? 'Loading…' : 'Refresh' }}
         </button>
       </div>
-    </div>
+    </header>
 
-    <div v-if="regions.length > 0" class="selector-bar">
-      <div class="selector">
-        <label class="selector-label" for="region-select">Region</label>
-        <select
-          id="region-select"
-          class="selector-input"
-          :value="region"
-          @change="selectRegion($event.target.value)"
-        >
-          <option v-for="r in regions" :key="r.name" :value="r.name">{{ r.name }}</option>
-        </select>
+    <section v-if="summary.length" class="summary" aria-label="Summary">
+      <div v-for="tile in summary" :key="tile.key" class="tile" :class="tile.key">
+        <span class="tile-label"><span class="dot" />{{ tile.label }}</span>
+        <span class="tile-value">{{ formatNumber(tile.value) }}</span>
+        <span class="tile-note" :title="tile.key === 'total' ? formatDate(index.updatedAt) : undefined">
+          {{ tile.note }}
+        </span>
       </div>
-      <div class="selector">
-        <label class="selector-label" for="dc-select">Data Center</label>
-        <select
-          id="dc-select"
-          class="selector-input"
-          :value="dataCenter"
-          @change="selectDataCenter($event.target.value)"
-        >
-          <option v-for="dc in dataCentersInRegion" :key="dc.name" :value="dc.name">
-            {{ dc.name }}<template v-if="dc.indexed === 0"> (not indexed yet)</template>
-          </option>
-        </select>
-      </div>
-      <p class="selector-note">
-        Prices are per data center &mdash; players cannot trade across them.
-      </p>
-    </div>
+    </section>
 
-    <div v-if="index" class="stats-bar">
-      <div class="stat-item">
-        <span class="stat-label">Total:</span>
-        <span class="stat-value">{{ stats.total }}</span>
-      </div>
-      <div v-for="c in CLASSIFICATIONS" :key="c" class="stat-item" :class="c">
-        <span class="stat-label">{{ LABELS[c] }}:</span>
-        <span class="stat-value">{{ stats[c] }}</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Index updated:</span>
-        <span class="stat-value">{{ formatDate(index.updatedAt) }}</span>
-      </div>
-      <div v-if="index.sweeping" class="stat-item">
-        <span class="stat-label">Sweeping:</span>
-        <span class="stat-value">{{ index.indexed }} / {{ index.total }}</span>
-      </div>
-    </div>
+    <p v-if="error" class="error" role="alert">Error: {{ error }}</p>
 
-    <div v-if="error" class="error-message">
-      Error: {{ error }}
-    </div>
+    <p v-if="loading" class="notice">Loading item index from backend…</p>
 
-    <div v-if="loading" class="loading">
-      Loading item index from backend...
-    </div>
-
-    <div v-else-if="index && index.indexed === 0" class="loading">
+    <p v-else-if="index && index.indexed === 0" class="notice">
       {{ dataCenter }} has not been indexed yet. The server has been asked to sweep it
       next &mdash; this takes about half a minute. Refresh shortly.
-    </div>
+    </p>
 
-    <div v-else class="items-container">
-      <div
+    <div v-else-if="index" class="sections">
+      <ClassificationSection
         v-for="c in CLASSIFICATIONS"
         :key="c"
-        class="classification-card"
-        :class="`${c}-card`"
-      >
-        <div class="card-header" @click="toggleCard(c)">
-          <div class="card-title">
-            <span class="classification-badge" :class="`${c}-badge`">{{ LABELS[c] }}</span>
-            <span class="card-count">({{ organizedItems[c].length }} items)</span>
-          </div>
-          <div class="card-subtitle">{{ subtitle(c) }}</div>
-          <span class="card-toggle">{{ expandedCards[c] ? '▼' : '▶' }}</span>
-        </div>
-
-        <div v-if="expandedCards[c]" class="card-content">
-          <div v-if="loadingClassifications[c]" class="loading-items">
-            Fetching prices from Universalis... {{ progress[c] }}%
-          </div>
-          <div v-if="!loadingClassifications[c] && organizedItems[c].length === 0" class="no-items">
-            No {{ c }} items found
-          </div>
-          <div v-else class="items-grid">
-            <div
-              v-for="item in organizedItems[c]"
-              :key="item.id"
-              class="item-card"
-              :class="{ 'no-data': !item.marketData || !item.marketData.hasData }"
-            >
-              <div class="item-header">
-                <div class="item-name-section">
-                  <h3 class="item-name">{{ item.name }}</h3>
-                  <a
-                    :href="`https://universalis.app/market/${item.id}`"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="item-link"
-                    title="View on Universalis"
-                  >
-                    🔗
-                  </a>
-                </div>
-                <span class="item-id">ID: {{ item.id }}</span>
-              </div>
-
-              <div v-if="!item.marketData" class="no-market-data">
-                No market data available
-              </div>
-
-              <div v-else class="market-info">
-                <div class="sale-velocity-badge">
-                  <span class="velocity-label">Sold/day:</span>
-                  <span class="velocity-value">{{ formatVelocity(item.velocity) }}</span>
-                </div>
-
-                <div class="price-section">
-                  <div class="price-row">
-                    <span class="price-label">Current Avg:</span>
-                    <span class="price-value">{{ formatPrice(item.marketData.prices.currentAverage) }} gil</span>
-                  </div>
-                  <div class="price-row">
-                    <span class="price-label">Min:</span>
-                    <span class="price-value min-price">{{ formatPrice(item.marketData.prices.min) }} gil</span>
-                  </div>
-                </div>
-
-                <div class="stats-section">
-                  <div class="stat">
-                    <span class="stat-label">Listings:</span>
-                    <span class="stat-value">{{ formatNumber(item.marketData.listingsCount) }}</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">For Sale:</span>
-                    <span class="stat-value">{{ formatNumber(item.marketData.unitsForSale) }}</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">Sold/day:</span>
-                    <span class="stat-value">{{ formatVelocity(item.velocity) }}</span>
-                  </div>
-                </div>
-
-                <div v-if="item.marketData.listings && item.marketData.listings.length > 0" class="listings-section">
-                  <div class="listings-header" @click="toggleListings(item.id)">
-                    <span>Listings ({{ item.marketData.listings.length }})</span>
-                    <span class="listings-toggle">{{ expandedListings[item.id] ? '▼' : '▶' }}</span>
-                  </div>
-                  <div v-if="expandedListings[item.id]" class="listings-content">
-                    <div
-                      v-for="(listing, i) in item.marketData.listings.slice(0, 5)"
-                      :key="listing.listingID || i"
-                      class="listing-item"
-                    >
-                      <span class="listing-price">{{ formatPrice(listing.pricePerUnit) }} gil</span>
-                      <span class="listing-quantity">×{{ listing.quantity }}</span>
-                      <span class="listing-total">{{ formatPrice(listing.total) }} gil</span>
-                      <span class="listing-world">{{ listing.worldName }}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="update-info">
-                  <span class="update-label">Last Upload:</span>
-                  <span class="update-time">{{ formatDate(item.marketData.lastUploadTime) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        :classification="c"
+        :label="LABELS[c]"
+        :subtitle="subtitle(c)"
+        :items="organizedItems[c]"
+        :expanded="expandedCards[c]"
+        :loading="loadingClassifications[c]"
+        :progress="progress[c]"
+        @toggle="toggleCard(c)"
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
-.item-market-display {
-  width: 100%;
-  padding: 1rem;
+.market {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
 }
 
-.header {
-  margin-bottom: 2rem;
+.page-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-end;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 24px 32px;
 }
 
-.header h2 {
-  margin: 0;
-  color: hsla(160, 100%, 37%, 1);
+.title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 40rem;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 4vw, 40px);
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+
+.lede {
+  color: var(--muted);
 }
 
 .controls {
   display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.refresh-btn {
-  padding: 0.5rem 1rem;
-  background-color: hsla(160, 100%, 37%, 1);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background-color 0.3s;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background-color: hsla(160, 100%, 30%, 1);
-}
-
-.refresh-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.selector-bar {
-  display: flex;
-  gap: 1.5rem;
   align-items: flex-end;
   flex-wrap: wrap;
-  padding: 1rem;
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  margin-bottom: 1rem;
+  gap: 12px;
 }
 
-.selector {
+.field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 6px;
+  flex: 1 1 10rem;
 }
 
-.selector-label {
-  font-size: 0.8rem;
+.field-label {
+  font-size: 12px;
   font-weight: 600;
-  color: #666;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  color: var(--muted);
 }
 
-.selector-input {
-  padding: 0.45rem 0.6rem;
-  font-size: 0.95rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background-color: white;
-  color: #2c3e50;
-  min-width: 12rem;
-  cursor: pointer;
-}
-
-.selector-input:focus {
-  outline: 2px solid hsla(160, 100%, 37%, 1);
-  outline-offset: -1px;
-}
-
-.selector-note {
-  margin: 0 0 0.4rem;
-  font-size: 0.8rem;
-  color: #888;
-  flex: 1 1 14rem;
-}
-
-.stats-bar {
-  display: flex;
-  gap: 1rem;
-  padding: 1rem;
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
-}
-
-.stat-item {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background-color: white;
-  border-radius: 4px;
-  border-left: 4px solid #6c757d;
-}
-
-.stat-item.hot {
-  border-left-color: #dc3545;
-}
-
-.stat-item.mild {
-  border-left-color: #ffc107;
-}
-
-.stat-item.cold {
-  border-left-color: #17a2b8;
-}
-
-.stat-label {
-  font-weight: 600;
-  color: #666;
-}
-
-.stat-value {
-  font-weight: 700;
-  color: #333;
-}
-
-.error-message {
-  background-color: #fee;
-  color: #c33;
-  padding: 1rem;
-  border-radius: 4px;
-  margin-bottom: 1rem;
-}
-
-.loading {
-  text-align: center;
-  padding: 2rem;
-  color: #666;
-}
-
-.items-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.classification-card {
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  overflow: hidden;
-  background-color: #fff;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.hot-card {
-  border-color: #dc3545;
-}
-
-.mild-card {
-  border-color: #ffc107;
-}
-
-.cold-card {
-  border-color: #17a2b8;
-}
-
-.card-header {
-  padding: 1rem 1.5rem;
-  background-color: #f8f9fa;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  transition: background-color 0.2s;
-  user-select: none;
-}
-
-.card-header:hover {
-  background-color: #e9ecef;
-}
-
-.hot-card .card-header {
-  background-color: #fff5f5;
-}
-
-.mild-card .card-header {
-  background-color: #fffbf0;
-}
-
-.cold-card .card-header {
-  background-color: #f0f9ff;
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.classification-badge {
-  padding: 0.25rem 0.75rem;
-  border-radius: 12px;
-  font-weight: 700;
-  font-size: 0.9rem;
-  text-transform: uppercase;
-}
-
-.hot-badge {
-  background-color: #dc3545;
-  color: white;
-}
-
-.mild-badge {
-  background-color: #ffc107;
-  color: #333;
-}
-
-.cold-badge {
-  background-color: #17a2b8;
-  color: white;
-}
-
-.card-count {
-  font-weight: 600;
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.card-subtitle {
-  font-size: 0.85rem;
-  color: #999;
-  margin-top: 0.25rem;
-}
-
-.card-toggle {
-  font-size: 1.2rem;
-  color: #666;
-  font-weight: bold;
-}
-
-.card-content {
-  padding: 1.5rem;
-}
-
-.no-items {
-  text-align: center;
-  color: #999;
-  padding: 2rem;
-  font-style: italic;
-}
-
-.loading-items {
-  text-align: center;
-  padding: 2rem;
-  color: #666;
+.select {
+  height: 44px;
+  width: 100%;
+  min-width: 10rem;
+  padding: 0 40px 0 14px;
   font-weight: 500;
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b665c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>")
+    no-repeat right 14px center;
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  appearance: none;
+  cursor: pointer;
 }
 
-.items-grid {
+.refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-inverse);
+  background: var(--ink);
+  border: 0;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.refresh:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.refresh:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.summary {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
 }
 
-.item-card {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1rem;
-  background-color: #fff;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.item-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-}
-
-.item-card.no-data {
-  opacity: 0.7;
-}
-
-.item-header {
+.tile {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 22px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+}
+
+.tile.hot {
+  --class: var(--hot);
+}
+
+.tile.mild {
+  --class: var(--mild);
+}
+
+.tile.cold {
+  --class: var(--cold);
+}
+
+.tile-label {
+  display: inline-flex;
   align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 2px solid hsla(160, 100%, 37%, 0.2);
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--class, var(--muted));
 }
 
-.item-name-section {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--class);
 }
 
-.item-name {
-  margin: 0;
-  font-size: 1.1rem;
-  color: #333;
-}
-
-.item-link {
-  font-size: 1rem;
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: transform 0.2s;
+.tile.hot .dot,
+.tile.mild .dot,
+.tile.cold .dot {
   display: inline-block;
 }
 
-.item-link:hover {
-  transform: scale(1.2);
-}
-
-.item-id {
-  font-size: 0.85rem;
-  color: #666;
-}
-
-.no-market-data {
-  color: #999;
-  font-style: italic;
-  text-align: center;
-  padding: 1rem;
-}
-
-.market-info {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.sale-velocity-badge {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem;
-  background-color: #e7f3ff;
-  border-radius: 4px;
-  font-weight: 600;
-}
-
-.velocity-label {
-  color: #666;
-}
-
-.velocity-value {
-  color: #0066cc;
-  font-size: 1.1rem;
-}
-
-.price-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.price-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.price-label {
+.tile-value {
+  font-family: var(--font-display);
+  font-size: 30px;
   font-weight: 500;
-  color: #666;
+  line-height: 1.1;
 }
 
-.price-value {
-  font-weight: 600;
-  color: #333;
+.tile-note {
+  font-size: 13px;
+  color: var(--muted);
 }
 
-.min-price {
-  color: #28a745;
+.error {
+  padding: 12px 16px;
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-radius: var(--radius-control);
 }
 
-
-.stats-section {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
-  padding: 0.75rem;
-  background-color: #f8f9fa;
-  border-radius: 4px;
+.notice {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--muted);
 }
 
-.stat {
+.sections {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  font-size: 0.9rem;
+  gap: 28px;
 }
 
-.stat-label {
-  color: #666;
-  font-size: 0.85rem;
-}
-
-.stat-value {
-  font-weight: 600;
-  color: #333;
-  font-size: 1rem;
-}
-
-.listings-section {
-  margin-top: 0.5rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #eee;
-}
-
-.listings-header {
-  font-weight: 600;
-  color: #666;
-  font-size: 0.9rem;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-  user-select: none;
-}
-
-.listings-header:hover {
-  background-color: #f8f9fa;
-}
-
-.listings-toggle {
-  font-size: 0.8rem;
-  color: #999;
-}
-
-.listings-content {
-  margin-top: 0.5rem;
-  padding-left: 0.5rem;
-}
-
-.listing-item {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.5rem;
-  font-size: 0.85rem;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.listing-item:last-child {
-  border-bottom: none;
-}
-
-.listing-price {
-  font-weight: 600;
-  color: #333;
-}
-
-.listing-quantity {
-  color: #666;
-  text-align: right;
-}
-
-.listing-total {
-  color: #666;
-  font-size: 0.8rem;
-  text-align: right;
-}
-
-.listing-world {
-  color: #999;
-  font-size: 0.8rem;
-  text-align: right;
-}
-
-.update-info {
-  margin-top: 0.5rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #eee;
-  font-size: 0.85rem;
-  display: flex;
-  justify-content: space-between;
-}
-
-.update-label {
-  color: #666;
-}
-
-.update-time {
-  color: #999;
-}
-
-@media (max-width: 768px) {
-  .items-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 640px) {
+  .page-head {
+    align-items: stretch;
   }
 
-  .header {
-    flex-direction: column;
-    align-items: flex-start;
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .stats-bar {
-    flex-direction: column;
+  .refresh {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
+
+  .summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .tile {
+    padding: 14px 16px;
+  }
+
+  .tile-value {
+    font-size: 26px;
   }
 }
 </style>
