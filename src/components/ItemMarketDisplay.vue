@@ -64,6 +64,8 @@ const organizedItems = computed(() => {
     .map(([id, info]) => ({
       id,
       name: info.name,
+      // The largest of the item's listed quantities: how many one expects to sell
+      quantity: info.number?.at(-1) ?? null,
       velocity: typeof velocities[id] === 'number' ? velocities[id] : null,
       marketData: marketData.value[id] || null,
     }))

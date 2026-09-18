@@ -121,6 +121,9 @@ describe('ItemMarketDisplay', () => {
     expect(html).toContain('西兰花'); // item name comes from the bundled list
     expect(html).toContain('1,500'); // velocity from the index, not from market data
     expect(el.textContent).toContain('120 gil'); // the unit is set in its own span
+    // Expected profit: the item's largest quantity (50) at the cheapest listing (120)
+    expect(el.textContent).toContain('Expected profit');
+    expect(el.textContent).toContain('6,000 gil');
 
     // Listings stay collapsed until the user opens them
     expect(html).toContain('Listings (1)');

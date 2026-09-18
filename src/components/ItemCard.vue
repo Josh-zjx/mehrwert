@@ -12,7 +12,7 @@ import {
 const LISTINGS_SHOWN = 5;
 
 const props = defineProps({
-  /** { id, name, rank, velocity, marketData } */
+  /** { id, name, rank, quantity, velocity, marketData } */
   item: { type: Object, required: true },
   /** True while this item's category is still being fetched */
   loading: { type: Boolean, default: false },
@@ -31,6 +31,18 @@ const state = computed(() => {
 });
 
 const listings = computed(() => market.value?.listings?.slice(0, LISTINGS_SHOWN) ?? []);
+
+// What selling the item's full quantity would bring in at the cheapest listing
+// currently on the board. Nothing to sell against means no estimate.
+const cheapest = computed(() => {
+  const prices = listings.value.map(l => l.pricePerUnit).filter(p => p > 0);
+  return prices.length ? Math.min(...prices) : null;
+});
+
+const expectedProfit = computed(() => {
+  if (!props.item.quantity || cheapest.value === null) return null;
+  return props.item.quantity * cheapest.value;
+});
 
 const facts = computed(() => [
   { label: 'Min', value: formatPrice(market.value?.prices.min), unit: 'gil' },
@@ -72,6 +84,19 @@ const facts = computed(() => [
           <dd>{{ fact.value }} <span v-if="fact.unit" class="unit">{{ fact.unit }}</span></dd>
         </div>
       </dl>
+
+      <div class="profit" :class="{ none: expectedProfit === null }">
+        <span class="profit-label">Expected profit</span>
+        <span class="profit-value">
+          {{ formatPrice(expectedProfit) }} <span class="unit">gil</span>
+        </span>
+        <span class="profit-note">
+          <template v-if="expectedProfit !== null">
+            {{ formatNumber(item.quantity) }} × {{ formatPrice(cheapest) }} gil
+          </template>
+          <template v-else>no listing to price against</template>
+        </span>
+      </div>
 
       <footer class="card-foot">
         <div class="foot-row">
@@ -236,6 +261,46 @@ const facts = computed(() => [
 .unit {
   font-size: 12px;
   font-weight: 400;
+  color: var(--muted);
+}
+
+.profit {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  align-items: baseline;
+  padding: 12px 14px;
+  background: var(--hot-tint);
+  border-radius: 14px;
+}
+
+.profit.none {
+  background: var(--hairline-soft);
+  color: var(--muted);
+}
+
+.profit-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hot);
+}
+
+.profit.none .profit-label {
+  color: var(--muted);
+}
+
+.profit-value {
+  grid-row: span 2;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-align: right;
+}
+
+.profit-note {
+  font-size: 12px;
   color: var(--muted);
 }
 
