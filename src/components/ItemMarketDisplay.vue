@@ -4,6 +4,7 @@ import { fetchIndex, fetchDataCenters } from '../services/backendApi.js';
 import { fetchMarketDataForIds, getItemListMap } from '../services/itemMarketService.js';
 import { formatDate, formatNumber, formatRelativeTime } from '../utils/format.js';
 import ClassificationSection from './ClassificationSection.vue';
+import FloatingHeader from './FloatingHeader.vue';
 import { useTheme } from '../composables/useTheme.js';
 
 const CLASSIFICATIONS = ['hot', 'mild', 'cold'];
@@ -295,6 +296,8 @@ onUnmounted(() => {
 
 <template>
   <div class="market">
+    <FloatingHeader :region="region" :data-center="dataCenter" />
+
     <header class="page-head">
       <div class="title-block">
         <span class="eyebrow">Mehrwert</span>

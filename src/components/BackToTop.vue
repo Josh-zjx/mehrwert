@@ -1,31 +1,18 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { useScrolledPast } from '../composables/useScrolledPast.js';
 
 const props = defineProps({
   /** How far down the page must be scrolled before the button appears, in px */
   threshold: { type: Number, default: 600 },
 });
 
-const visible = ref(false);
-
-const onScroll = () => {
-  visible.value = window.scrollY > props.threshold;
-};
+const visible = useScrolledPast(props.threshold);
 
 const scrollToTop = () => {
   const reduceMotion =
     typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
 };
-
-onMounted(() => {
-  window.addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
-});
-
-onUnmounted(() => {
-  window.removeEventListener('scroll', onScroll);
-});
 </script>
 
 <template>
