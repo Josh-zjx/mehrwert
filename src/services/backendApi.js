@@ -1,10 +1,16 @@
 /**
  * Backend API Service
- * 
- * Client for communicating with the backend server
+ *
+ * Client for the backend's classification index. Market data is NOT fetched
+ * through here - it comes straight from Universalis via itemMarketService.js.
+ *
+ * Requests are relative by default (`/api/...`), which works both when the Express
+ * server serves the built frontend itself and in development via Vite's proxy
+ * (see vite.config.js). Set VITE_API_BASE_URL at build time only when the frontend
+ * is hosted separately from the API.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 /**
  * Helper function to make API requests with consistent error handling
@@ -15,11 +21,11 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000
 async function apiRequest(url, errorContext) {
   try {
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
     }
-    
+
     return await response.json();
   } catch (error) {
     console.error(`Error ${errorContext}:`, error);
@@ -28,52 +34,23 @@ async function apiRequest(url, errorContext) {
 }
 
 /**
- * Fetch all items from backend
- * @param {string} classification - Optional classification filter ('hot', 'mild', 'cold')
- * @returns {Promise<Array>} Array of items
+ * Fetch every data center Universalis supports, with indexing coverage
+ * @returns {Promise<Object>} { defaultDataCenter, dataCenters: [{ name, region,
+ *   worldCount, indexed, active, updatedAt }] }
  */
-export async function fetchAllItems(classification = null) {
-  const url = classification 
-    ? `${API_BASE_URL}/api/items?classification=${classification}`
-    : `${API_BASE_URL}/api/items`;
-  
-  const data = await apiRequest(url, 'fetching items from backend');
-  return data.items || [];
+export async function fetchDataCenters() {
+  return await apiRequest(`${API_BASE_URL}/api/data-centers`, 'fetching data centers');
 }
 
 /**
- * Fetch item by ID from backend
- * @param {number} itemID - Item ID
- * @returns {Promise<Object>} Item data
+ * Fetch the classification index for a data center
+ * @param {string} dataCenter - Data center name
+ * @returns {Promise<Object>} Index payload: { dataCenter, updatedAt, sweeping,
+ *   total, indexed, hotLimit, mildThreshold, velocities: { [itemID]: unitsPerDay } }
  */
-export async function fetchItemById(itemID) {
-  const data = await apiRequest(
-    `${API_BASE_URL}/api/items/${itemID}`, 
-    'fetching item from backend'
-  );
-  return data.item;
-}
-
-/**
- * Fetch multiple items by IDs from backend
- * @param {number[]} itemIDs - Array of item IDs
- * @returns {Promise<Array>} Array of items
- */
-export async function fetchItemsByIds(itemIDs) {
-  const idsString = itemIDs.join(',');
-  const data = await apiRequest(
-    `${API_BASE_URL}/api/items/batch/${idsString}`, 
-    'fetching items from backend'
-  );
-  return data.items || [];
-}
-
-/**
- * Fetch server statistics
- * @returns {Promise<Object>} Server statistics
- */
-export async function fetchStats() {
-  return await apiRequest(`${API_BASE_URL}/api/stats`, 'fetching stats from backend');
+export async function fetchIndex(dataCenter) {
+  const query = dataCenter ? `?dc=${encodeURIComponent(dataCenter)}` : '';
+  return await apiRequest(`${API_BASE_URL}/api/index${query}`, 'fetching index from backend');
 }
 
 /**

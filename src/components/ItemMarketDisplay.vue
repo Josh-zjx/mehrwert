@@ -1,33 +1,30 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
-import { fetchAllItems, fetchStats } from '../services/backendApi.js';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { fetchIndex, fetchDataCenters } from '../services/backendApi.js';
+import { fetchMarketDataForIds, getItemListMap } from '../services/itemMarketService.js';
 
-const items = ref([]);
+const CLASSIFICATIONS = ['hot', 'mild', 'cold'];
+const LABELS = { hot: 'Hot', mild: 'Mild', cold: 'Cold' };
+
+// Item names/metadata are bundled with the frontend - the backend only tells us
+// how active each item is, and the market data comes straight from Universalis.
+const itemsById = getItemListMap();
+
+const catalog = ref(null);
+const region = ref(null);
+const dataCenter = ref(null);
+const index = ref(null);
+const marketData = ref({});
 const loading = ref(true);
 const error = ref(null);
-const stats = ref(null);
-const expandedCards = ref({
-  hot: true,
-  mild: false,
-  cold: false,
-});
-
-// Track which classifications have been loaded
-const loadedClassifications = ref(new Set(['hot'])); // Hot is loaded by default
-
-// Track loading state per classification
-const loadingClassifications = ref({
-  hot: false,
-  mild: false,
-  cold: false,
-});
-
-// Track expanded listings for each item
+const expandedCards = ref({ hot: true, mild: false, cold: false });
+const loadedClassifications = ref(new Set());
+const loadingClassifications = ref({ hot: false, mild: false, cold: false });
+const progress = ref({ hot: 0, mild: 0, cold: 0 });
 const expandedListings = ref({});
 
 const formatPrice = (price) => {
-  if (price === 'NA' || price === null || price === undefined || price === 0) return 'N/A';
-  if (typeof price === 'string') return price; // Return string values as-is (e.g., "NA")
+  if (price === null || price === undefined || price === 0) return 'N/A';
   return price.toLocaleString('en-US');
 };
 
@@ -36,53 +33,183 @@ const formatDate = (timestamp) => {
   return new Date(timestamp).toLocaleString();
 };
 
-// Organize items by classification and sort by unitsSold
+const formatNumber = (value) => {
+  if (value === null || value === undefined) return 'N/A';
+  return value.toLocaleString('en-US');
+};
+
+const formatVelocity = (velocity) => {
+  if (velocity === null || velocity === undefined) return 'N/A';
+  if (velocity >= 100) return Math.round(velocity).toLocaleString('en-US');
+  return velocity.toFixed(1);
+};
+
+// Regions in the order Universalis lists them, each with its data centers.
+// Data centers with no recorded sales at all (beta ones) are hidden - they would
+// render as an entirely empty page.
+const regions = computed(() => {
+  if (!catalog.value) return [];
+
+  const byRegion = new Map();
+  for (const dc of catalog.value.dataCenters) {
+    if (dc.indexed > 0 && !dc.active) continue;
+    if (!byRegion.has(dc.region)) byRegion.set(dc.region, []);
+    byRegion.get(dc.region).push(dc);
+  }
+
+  return [...byRegion].map(([name, dataCenters]) => ({ name, dataCenters }));
+});
+
+const dataCentersInRegion = computed(() => {
+  return regions.value.find(r => r.name === region.value)?.dataCenters || [];
+});
+
+// Every item from the bundled list, ranked by sale velocity and grouped.
+//
+// Hot is the top `hotLimit` items by velocity rather than everything over a
+// threshold. That keeps the set bounded, so opening the page is always one request
+// no matter how busy the market is. Mild/cold fall out of a rate threshold.
+// Items the backend has not swept yet have no velocity and sort to the bottom.
 const organizedItems = computed(() => {
-  const hot = [];
-  const mild = [];
-  const cold = [];
+  const groups = { hot: [], mild: [], cold: [] };
+  if (!index.value) return groups;
 
-  items.value.forEach(item => {
-    // Extract saleVelocity from marketData structure
-    // Use unitsSold as velocity
-    const rawVelocity = item.marketData?.unitsSold;
-    // Handle "NA" values - treat as 0 for sorting purposes
-    const saleVelocity = (rawVelocity === 'NA' || rawVelocity === null || rawVelocity === undefined) ? 0 : rawVelocity;
-    const itemWithVelocity = {
-      ...item,
-      saleVelocity,
-    };
+  const { velocities, hotLimit, mildThreshold } = index.value;
 
-    switch (item.classification) {
-      case 'hot':
-        hot.push(itemWithVelocity);
-        break;
-      case 'mild':
-        mild.push(itemWithVelocity);
-        break;
-      case 'cold':
-        cold.push(itemWithVelocity);
-        break;
+  const ranked = [...itemsById]
+    .map(([id, info]) => ({
+      id,
+      name: info.name,
+      velocity: typeof velocities[id] === 'number' ? velocities[id] : null,
+      marketData: marketData.value[id] || null,
+    }))
+    .sort((a, b) => (b.velocity ?? -1) - (a.velocity ?? -1));
+
+  ranked.forEach((item, rank) => {
+    // An item with no recorded sales is never hot, however few items are indexed
+    if (rank < hotLimit && item.velocity > 0) {
+      groups.hot.push(item);
+    } else if (item.velocity >= mildThreshold) {
+      groups.mild.push(item);
+    } else {
+      groups.cold.push(item);
     }
   });
 
-  // Sort by unitsSold in decreasing order
-  const sortByVelocity = (a, b) => b.saleVelocity - a.saleVelocity;
-
-  return {
-    hot: hot.sort(sortByVelocity),
-    mild: mild.sort(sortByVelocity),
-    cold: cold.sort(sortByVelocity),
-  };
+  return groups;
 });
 
+const stats = computed(() => ({
+  total: itemsById.size,
+  hot: organizedItems.value.hot.length,
+  mild: organizedItems.value.mild.length,
+  cold: organizedItems.value.cold.length,
+}));
+
+const subtitle = (classification) => {
+  if (!index.value) return '';
+  const { hotLimit, mildThreshold } = index.value;
+  if (classification === 'hot') return `Top ${hotLimit} by daily sales`;
+  if (classification === 'mild') return `≥ ${mildThreshold} sold/day`;
+  return `< ${mildThreshold} sold/day`;
+};
+
+/**
+ * Read the region and data center out of the URL so a page can be bookmarked.
+ * @returns {{region: string|null, dc: string|null}}
+ */
+const readUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  return { region: params.get('region'), dc: params.get('dc') };
+};
+
+/**
+ * Reflect the current selection in the URL without reloading the page.
+ * @param {boolean} replace - Replace the entry instead of pushing a new one
+ */
+const writeUrl = (replace = false) => {
+  if (!region.value || !dataCenter.value) return;
+
+  const params = new URLSearchParams(window.location.search);
+  params.set('region', region.value);
+  params.set('dc', dataCenter.value);
+
+  const url = `${window.location.pathname}?${params}`;
+  if (replace) {
+    window.history.replaceState({}, '', url);
+  } else {
+    window.history.pushState({}, '', url);
+  }
+};
+
+/**
+ * Resolve a region/data center pair against the catalog, falling back to the
+ * backend's default when the URL names something that does not exist.
+ * @param {string|null} wantedRegion - Region from the URL
+ * @param {string|null} wantedDc - Data center from the URL
+ * @returns {{region: string, dc: string}|null}
+ */
+const resolveSelection = (wantedRegion, wantedDc) => {
+  const all = regions.value.flatMap(r => r.dataCenters);
+  if (all.length === 0) return null;
+
+  // A data center name is unique, so it alone is enough to place the region
+  const match = all.find(dc => dc.name === wantedDc);
+  if (match) return { region: match.region, dc: match.name };
+
+  const inRegion = regions.value.find(r => r.name === wantedRegion)?.dataCenters[0];
+  if (inRegion) return { region: inRegion.region, dc: inRegion.name };
+
+  const fallback =
+    all.find(dc => dc.name === catalog.value?.defaultDataCenter) || all[0];
+  return { region: fallback.region, dc: fallback.name };
+};
+
+const loadClassification = async (classification) => {
+  if (loadingClassifications.value[classification]) return;
+
+  const ids = organizedItems.value[classification].map(item => item.id);
+  if (ids.length === 0) {
+    loadedClassifications.value.add(classification);
+    return;
+  }
+
+  loadingClassifications.value[classification] = true;
+  progress.value[classification] = 0;
+  error.value = null;
+
+  const requestedFor = dataCenter.value;
+
+  try {
+    await fetchMarketDataForIds(ids, {
+      worldName: dataCenter.value,
+      progressCallback: (value) => {
+        progress.value[classification] = value;
+      },
+      // Render each batch as it arrives rather than waiting for the whole category
+      onBatch: (items) => {
+        // Drop late results if the user switched data center mid-flight
+        if (requestedFor !== dataCenter.value) return;
+        marketData.value = { ...marketData.value, ...items };
+      },
+    });
+
+    if (requestedFor === dataCenter.value) {
+      loadedClassifications.value.add(classification);
+    }
+  } catch (err) {
+    error.value = err.message || `Failed to load ${classification} market data from Universalis`;
+    console.error(`Error loading ${classification} market data:`, err);
+  } finally {
+    loadingClassifications.value[classification] = false;
+  }
+};
+
 const toggleCard = async (classification) => {
-  const wasExpanded = expandedCards.value[classification];
   expandedCards.value[classification] = !expandedCards.value[classification];
-  
-  // If expanding and not yet loaded, fetch items for this classification
+
   if (expandedCards.value[classification] && !loadedClassifications.value.has(classification)) {
-    await loadClassificationData(classification);
+    await loadClassification(classification);
   }
 };
 
@@ -90,56 +217,85 @@ const toggleListings = (itemID) => {
   expandedListings.value[itemID] = !expandedListings.value[itemID];
 };
 
-const loadClassificationData = async (classification) => {
-  // Skip if already loaded
-  if (loadedClassifications.value.has(classification)) {
-    return;
-  }
-
-  loadingClassifications.value[classification] = true;
-  error.value = null;
-
-  try {
-    const itemsData = await fetchAllItems(classification);
-    
-    // Merge new items with existing items (avoid duplicates)
-    const existingIds = new Set(items.value.map(item => item.id));
-    const newItems = itemsData.filter(item => !existingIds.has(item.id));
-    items.value = [...items.value, ...newItems];
-    
-    loadedClassifications.value.add(classification);
-  } catch (err) {
-    error.value = err.message || `Failed to load ${classification} items from backend`;
-    console.error(`Error loading ${classification} items:`, err);
-  } finally {
-    loadingClassifications.value[classification] = false;
-  }
-};
-
+/**
+ * Load the index for the selected data center, then the open categories.
+ */
 const loadMarketData = async () => {
   loading.value = true;
   error.value = null;
+  marketData.value = {};
+  loadedClassifications.value = new Set();
+
+  const requestedFor = dataCenter.value;
 
   try {
-    // Load stats and hot items immediately (hot card is expanded by default)
-    const [hotItemsData, statsData] = await Promise.all([
-      fetchAllItems('hot'),
-      fetchStats(),
-    ]);
-
-    items.value = hotItemsData;
-    stats.value = statsData;
-    loadedClassifications.value.add('hot');
+    index.value = await fetchIndex(dataCenter.value);
   } catch (err) {
-    error.value = err.message || 'Failed to load market data from backend';
-    console.error('Error loading market data:', err);
-  } finally {
+    error.value = err.message || 'Failed to load the item index from the backend';
+    console.error('Error loading index:', err);
     loading.value = false;
+    return;
+  }
+
+  loading.value = false;
+  if (requestedFor !== dataCenter.value) return;
+
+  // Fetch market data for whatever is already open, hot by default
+  for (const classification of CLASSIFICATIONS.filter(c => expandedCards.value[c])) {
+    await loadClassification(classification);
   }
 };
 
-onMounted(() => {
-  loadMarketData();
+const selectRegion = async (name) => {
+  if (name === region.value) return;
+  region.value = name;
+  dataCenter.value = dataCentersInRegion.value[0]?.name || null;
+  writeUrl();
+  await loadMarketData();
+};
+
+const selectDataCenter = async (name) => {
+  if (name === dataCenter.value) return;
+  dataCenter.value = name;
+  writeUrl();
+  await loadMarketData();
+};
+
+/**
+ * Apply whatever the URL says, used on first load and on browser back/forward.
+ */
+const applyUrl = async (replace) => {
+  const { region: urlRegion, dc: urlDc } = readUrl();
+  const resolved = resolveSelection(urlRegion, urlDc);
+  if (!resolved) return;
+
+  if (resolved.region === region.value && resolved.dc === dataCenter.value) return;
+
+  region.value = resolved.region;
+  dataCenter.value = resolved.dc;
+  writeUrl(replace);
+  await loadMarketData();
+};
+
+const onPopState = () => {
+  applyUrl(true);
+};
+
+onMounted(async () => {
+  try {
+    catalog.value = await fetchDataCenters();
+  } catch (err) {
+    error.value = err.message || 'Failed to load data centers from the backend';
+    loading.value = false;
+    return;
+  }
+
+  window.addEventListener('popstate', onPopState);
+  await applyUrl(true);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('popstate', onPopState);
 });
 </script>
 
@@ -154,22 +310,52 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="stats" class="stats-bar">
+    <div v-if="regions.length > 0" class="selector-bar">
+      <div class="selector">
+        <label class="selector-label" for="region-select">Region</label>
+        <select
+          id="region-select"
+          class="selector-input"
+          :value="region"
+          @change="selectRegion($event.target.value)"
+        >
+          <option v-for="r in regions" :key="r.name" :value="r.name">{{ r.name }}</option>
+        </select>
+      </div>
+      <div class="selector">
+        <label class="selector-label" for="dc-select">Data Center</label>
+        <select
+          id="dc-select"
+          class="selector-input"
+          :value="dataCenter"
+          @change="selectDataCenter($event.target.value)"
+        >
+          <option v-for="dc in dataCentersInRegion" :key="dc.name" :value="dc.name">
+            {{ dc.name }}<template v-if="dc.indexed === 0"> (not indexed yet)</template>
+          </option>
+        </select>
+      </div>
+      <p class="selector-note">
+        Prices are per data center &mdash; players cannot trade across them.
+      </p>
+    </div>
+
+    <div v-if="index" class="stats-bar">
       <div class="stat-item">
         <span class="stat-label">Total:</span>
-        <span class="stat-value">{{ stats.stats.total }}</span>
+        <span class="stat-value">{{ stats.total }}</span>
       </div>
-      <div class="stat-item hot">
-        <span class="stat-label">Hot:</span>
-        <span class="stat-value">{{ stats.stats.hot }}</span>
+      <div v-for="c in CLASSIFICATIONS" :key="c" class="stat-item" :class="c">
+        <span class="stat-label">{{ LABELS[c] }}:</span>
+        <span class="stat-value">{{ stats[c] }}</span>
       </div>
-      <div class="stat-item mild">
-        <span class="stat-label">Mild:</span>
-        <span class="stat-value">{{ stats.stats.mild }}</span>
+      <div class="stat-item">
+        <span class="stat-label">Index updated:</span>
+        <span class="stat-value">{{ formatDate(index.updatedAt) }}</span>
       </div>
-      <div class="stat-item cold">
-        <span class="stat-label">Cold:</span>
-        <span class="stat-value">{{ stats.stats.cold }}</span>
+      <div v-if="index.sweeping" class="stat-item">
+        <span class="stat-label">Sweeping:</span>
+        <span class="stat-value">{{ index.indexed }} / {{ index.total }}</span>
       </div>
     </div>
 
@@ -178,27 +364,40 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="loading">
-      Loading market data from backend...
+      Loading item index from backend...
+    </div>
+
+    <div v-else-if="index && index.indexed === 0" class="loading">
+      {{ dataCenter }} has not been indexed yet. The server has been asked to sweep it
+      next &mdash; this takes about half a minute. Refresh shortly.
     </div>
 
     <div v-else class="items-container">
-      <!-- Hot Items Card -->
-      <div class="classification-card hot-card">
-        <div class="card-header" @click="toggleCard('hot')">
+      <div
+        v-for="c in CLASSIFICATIONS"
+        :key="c"
+        class="classification-card"
+        :class="`${c}-card`"
+      >
+        <div class="card-header" @click="toggleCard(c)">
           <div class="card-title">
-            <span class="classification-badge hot-badge">Hot</span>
-            <span class="card-count">({{ organizedItems.hot.length }} items)</span>
+            <span class="classification-badge" :class="`${c}-badge`">{{ LABELS[c] }}</span>
+            <span class="card-count">({{ organizedItems[c].length }} items)</span>
           </div>
-          <div class="card-subtitle">Updated every minute • Units Sold ≥ 1000</div>
-          <span class="card-toggle">{{ expandedCards.hot ? '▼' : '▶' }}</span>
+          <div class="card-subtitle">{{ subtitle(c) }}</div>
+          <span class="card-toggle">{{ expandedCards[c] ? '▼' : '▶' }}</span>
         </div>
-        <div v-if="expandedCards.hot" class="card-content">
-          <div v-if="organizedItems.hot.length === 0" class="no-items">
-            No hot items found
+
+        <div v-if="expandedCards[c]" class="card-content">
+          <div v-if="loadingClassifications[c]" class="loading-items">
+            Fetching prices from Universalis... {{ progress[c] }}%
+          </div>
+          <div v-if="!loadingClassifications[c] && organizedItems[c].length === 0" class="no-items">
+            No {{ c }} items found
           </div>
           <div v-else class="items-grid">
             <div
-              v-for="item in organizedItems.hot"
+              v-for="item in organizedItems[c]"
               :key="item.id"
               class="item-card"
               :class="{ 'no-data': !item.marketData || !item.marketData.hasData }"
@@ -206,9 +405,9 @@ onMounted(() => {
               <div class="item-header">
                 <div class="item-name-section">
                   <h3 class="item-name">{{ item.name }}</h3>
-                  <a 
-                    :href="`https://universalis.app/market/${item.id}`" 
-                    target="_blank" 
+                  <a
+                    :href="`https://universalis.app/market/${item.id}`"
+                    target="_blank"
                     rel="noopener noreferrer"
                     class="item-link"
                     title="View on Universalis"
@@ -225,35 +424,33 @@ onMounted(() => {
 
               <div v-else class="market-info">
                 <div class="sale-velocity-badge">
-                  <span class="velocity-label">Units Sold:</span>
-                  <span class="velocity-value">
-                    {{ item.marketData?.unitsSold === 'NA' || item.marketData?.unitsSold === null || item.marketData?.unitsSold === undefined || !item.marketData?.hasData ? 'N/A' : item.saleVelocity.toFixed(0) }}
-                  </span>
+                  <span class="velocity-label">Sold/day:</span>
+                  <span class="velocity-value">{{ formatVelocity(item.velocity) }}</span>
                 </div>
 
                 <div class="price-section">
                   <div class="price-row">
                     <span class="price-label">Current Avg:</span>
-                    <span class="price-value">{{ formatPrice(item.marketData.currentAveragePrice) }} gil</span>
+                    <span class="price-value">{{ formatPrice(item.marketData.prices.currentAverage) }} gil</span>
                   </div>
                   <div class="price-row">
                     <span class="price-label">Min:</span>
-                    <span class="price-value min-price">{{ formatPrice(item.marketData.minPrice) }} gil</span>
+                    <span class="price-value min-price">{{ formatPrice(item.marketData.prices.min) }} gil</span>
                   </div>
                 </div>
 
                 <div class="stats-section">
                   <div class="stat">
                     <span class="stat-label">Listings:</span>
-                    <span class="stat-value">{{ item.marketData.listingsCount }}</span>
+                    <span class="stat-value">{{ formatNumber(item.marketData.listingsCount) }}</span>
                   </div>
                   <div class="stat">
                     <span class="stat-label">For Sale:</span>
-                    <span class="stat-value">{{ item.marketData.unitsForSale === 'NA' ? 'N/A' : item.marketData.unitsForSale }}</span>
+                    <span class="stat-value">{{ formatNumber(item.marketData.unitsForSale) }}</span>
                   </div>
                   <div class="stat">
-                    <span class="stat-label">Sold:</span>
-                    <span class="stat-value">{{ item.marketData.unitsSold === 'NA' ? 'N/A' : item.marketData.unitsSold }}</span>
+                    <span class="stat-label">Sold/day:</span>
+                    <span class="stat-value">{{ formatVelocity(item.velocity) }}</span>
                   </div>
                 </div>
 
@@ -264,8 +461,8 @@ onMounted(() => {
                   </div>
                   <div v-if="expandedListings[item.id]" class="listings-content">
                     <div
-                      v-for="(listing, index) in item.marketData.listings.slice(0, 5)"
-                      :key="listing.listingID || index"
+                      v-for="(listing, i) in item.marketData.listings.slice(0, 5)"
+                      :key="listing.listingID || i"
                       class="listing-item"
                     >
                       <span class="listing-price">{{ formatPrice(listing.pricePerUnit) }} gil</span>
@@ -277,222 +474,8 @@ onMounted(() => {
                 </div>
 
                 <div class="update-info">
-                  <span class="update-label">Last Updated:</span>
-                  <span class="update-time">{{ formatDate(item.lastUpdate) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Mild Items Card -->
-      <div class="classification-card mild-card">
-        <div class="card-header" @click="toggleCard('mild')">
-          <div class="card-title">
-            <span class="classification-badge mild-badge">Mild</span>
-            <span class="card-count">({{ organizedItems.mild.length }} items)</span>
-          </div>
-          <div class="card-subtitle">Updated every hour • Units Sold 100-999</div>
-          <span class="card-toggle">{{ expandedCards.mild ? '▼' : '▶' }}</span>
-        </div>
-        <div v-if="expandedCards.mild" class="card-content">
-          <div v-if="loadingClassifications.mild" class="loading-items">
-            Loading mild items...
-          </div>
-          <div v-else-if="organizedItems.mild.length === 0" class="no-items">
-            No mild items found
-          </div>
-          <div v-else class="items-grid">
-            <div
-              v-for="item in organizedItems.mild"
-              :key="item.id"
-              class="item-card"
-              :class="{ 'no-data': !item.marketData || !item.marketData.hasData }"
-            >
-              <div class="item-header">
-                <div class="item-name-section">
-                  <h3 class="item-name">{{ item.name }}</h3>
-                  <a 
-                    :href="`https://universalis.app/market/${item.id}`" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    class="item-link"
-                    title="View on Universalis"
-                  >
-                    🔗
-                  </a>
-                </div>
-                <span class="item-id">ID: {{ item.id }}</span>
-              </div>
-
-              <div v-if="!item.marketData" class="no-market-data">
-                No market data available
-              </div>
-
-              <div v-else class="market-info">
-                <div class="sale-velocity-badge">
-                  <span class="velocity-label">Units Sold:</span>
-                  <span class="velocity-value">
-                    {{ item.marketData?.unitsSold === 'NA' || item.marketData?.unitsSold === null || item.marketData?.unitsSold === undefined || !item.marketData?.hasData ? 'N/A' : item.saleVelocity.toFixed(0) }}
-                  </span>
-                </div>
-
-                <div class="price-section">
-                  <div class="price-row">
-                    <span class="price-label">Current Avg:</span>
-                    <span class="price-value">{{ formatPrice(item.marketData.currentAveragePrice) }} gil</span>
-                  </div>
-                  <div class="price-row">
-                    <span class="price-label">Min:</span>
-                    <span class="price-value min-price">{{ formatPrice(item.marketData.minPrice) }} gil</span>
-                  </div>
-                </div>
-
-                <div class="stats-section">
-                  <div class="stat">
-                    <span class="stat-label">Listings:</span>
-                    <span class="stat-value">{{ item.marketData.listingsCount }}</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">For Sale:</span>
-                    <span class="stat-value">{{ item.marketData.unitsForSale === 'NA' ? 'N/A' : item.marketData.unitsForSale }}</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">Sold:</span>
-                    <span class="stat-value">{{ item.marketData.unitsSold === 'NA' ? 'N/A' : item.marketData.unitsSold }}</span>
-                  </div>
-                </div>
-
-                <div v-if="item.marketData.listings && item.marketData.listings.length > 0" class="listings-section">
-                  <div class="listings-header" @click="toggleListings(item.id)">
-                    <span>Listings ({{ item.marketData.listings.length }})</span>
-                    <span class="listings-toggle">{{ expandedListings[item.id] ? '▼' : '▶' }}</span>
-                  </div>
-                  <div v-if="expandedListings[item.id]" class="listings-content">
-                    <div
-                      v-for="(listing, index) in item.marketData.listings.slice(0, 5)"
-                      :key="listing.listingID || index"
-                      class="listing-item"
-                    >
-                      <span class="listing-price">{{ formatPrice(listing.pricePerUnit) }} gil</span>
-                      <span class="listing-quantity">×{{ listing.quantity }}</span>
-                      <span class="listing-total">{{ formatPrice(listing.total) }} gil</span>
-                      <span class="listing-world">{{ listing.worldName }}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="update-info">
-                  <span class="update-label">Last Updated:</span>
-                  <span class="update-time">{{ formatDate(item.lastUpdate) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Cold Items Card -->
-      <div class="classification-card cold-card">
-        <div class="card-header" @click="toggleCard('cold')">
-          <div class="card-title">
-            <span class="classification-badge cold-badge">Cold</span>
-            <span class="card-count">({{ organizedItems.cold.length }} items)</span>
-          </div>
-          <div class="card-subtitle">Updated daily • Units Sold &lt; 100</div>
-          <span class="card-toggle">{{ expandedCards.cold ? '▼' : '▶' }}</span>
-        </div>
-        <div v-if="expandedCards.cold" class="card-content">
-          <div v-if="loadingClassifications.cold" class="loading-items">
-            Loading cold items...
-          </div>
-          <div v-else-if="organizedItems.cold.length === 0" class="no-items">
-            No cold items found
-          </div>
-          <div v-else class="items-grid">
-            <div
-              v-for="item in organizedItems.cold"
-              :key="item.id"
-              class="item-card"
-              :class="{ 'no-data': !item.marketData || !item.marketData.hasData }"
-            >
-              <div class="item-header">
-                <div class="item-name-section">
-                  <h3 class="item-name">{{ item.name }}</h3>
-                  <a 
-                    :href="`https://universalis.app/market/${item.id}`" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    class="item-link"
-                    title="View on Universalis"
-                  >
-                    🔗
-                  </a>
-                </div>
-                <span class="item-id">ID: {{ item.id }}</span>
-              </div>
-
-              <div v-if="!item.marketData" class="no-market-data">
-                No market data available
-              </div>
-
-              <div v-else class="market-info">
-                <div class="sale-velocity-badge">
-                  <span class="velocity-label">Units Sold:</span>
-                  <span class="velocity-value">
-                    {{ item.marketData?.unitsSold === 'NA' || item.marketData?.unitsSold === null || item.marketData?.unitsSold === undefined || !item.marketData?.hasData ? 'N/A' : item.saleVelocity.toFixed(0) }}
-                  </span>
-                </div>
-
-                <div class="price-section">
-                  <div class="price-row">
-                    <span class="price-label">Current Avg:</span>
-                    <span class="price-value">{{ formatPrice(item.marketData.currentAveragePrice) }} gil</span>
-                  </div>
-                  <div class="price-row">
-                    <span class="price-label">Min:</span>
-                    <span class="price-value min-price">{{ formatPrice(item.marketData.minPrice) }} gil</span>
-                  </div>
-                </div>
-
-                <div class="stats-section">
-                  <div class="stat">
-                    <span class="stat-label">Listings:</span>
-                    <span class="stat-value">{{ item.marketData.listingsCount }}</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">For Sale:</span>
-                    <span class="stat-value">{{ item.marketData.unitsForSale === 'NA' ? 'N/A' : item.marketData.unitsForSale }}</span>
-                  </div>
-                  <div class="stat">
-                    <span class="stat-label">Sold:</span>
-                    <span class="stat-value">{{ item.marketData.unitsSold === 'NA' ? 'N/A' : item.marketData.unitsSold }}</span>
-                  </div>
-                </div>
-
-                <div v-if="item.marketData.listings && item.marketData.listings.length > 0" class="listings-section">
-                  <div class="listings-header" @click="toggleListings(item.id)">
-                    <span>Listings ({{ item.marketData.listings.length }})</span>
-                    <span class="listings-toggle">{{ expandedListings[item.id] ? '▼' : '▶' }}</span>
-                  </div>
-                  <div v-if="expandedListings[item.id]" class="listings-content">
-                    <div
-                      v-for="(listing, index) in item.marketData.listings.slice(0, 5)"
-                      :key="listing.listingID || index"
-                      class="listing-item"
-                    >
-                      <span class="listing-price">{{ formatPrice(listing.pricePerUnit) }} gil</span>
-                      <span class="listing-quantity">×{{ listing.quantity }}</span>
-                      <span class="listing-total">{{ formatPrice(listing.total) }} gil</span>
-                      <span class="listing-world">{{ listing.worldName }}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="update-info">
-                  <span class="update-label">Last Updated:</span>
-                  <span class="update-time">{{ formatDate(item.lastUpdate) }}</span>
+                  <span class="update-label">Last Upload:</span>
+                  <span class="update-time">{{ formatDate(item.marketData.lastUploadTime) }}</span>
                 </div>
               </div>
             </div>
@@ -502,7 +485,6 @@ onMounted(() => {
     </div>
   </div>
 </template>
-
 
 <style scoped>
 .item-market-display {
@@ -548,6 +530,54 @@ onMounted(() => {
 .refresh-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.selector-bar {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.selector-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.selector-input {
+  padding: 0.45rem 0.6rem;
+  font-size: 0.95rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: white;
+  color: #2c3e50;
+  min-width: 12rem;
+  cursor: pointer;
+}
+
+.selector-input:focus {
+  outline: 2px solid hsla(160, 100%, 37%, 1);
+  outline-offset: -1px;
+}
+
+.selector-note {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: #888;
+  flex: 1 1 14rem;
 }
 
 .stats-bar {

@@ -1,16 +1,22 @@
 /**
  * Universalis API Client
- * 
- * Handles API calls to Universalis with global rate limiting
+ *
+ * Handles API calls to Universalis with global rate limiting.
+ *
+ * The sweep uses the /aggregated endpoint exclusively. It serves cached values and
+ * the docs mark it "strongly preferred over CurrentlyShown if individual
+ * sales/listings are not required" - which is exactly our case, since the index
+ * only needs a sale velocity. It also accepts 100 item IDs per call and answers in
+ * ~2-4s, where CurrentlyShown times out past ~10 items at data-center scope.
  */
 
-import { delay, buildQueryString } from '../utils/common.js';
+import { delay } from '../utils/common.js';
 
 const UNIVERSALIS_API_BASE = 'https://universalis.app/api/v2';
-const MAX_ITEMS_PER_CALL = 5;
+const MAX_ITEMS_PER_CALL = 100;
 const BASE_DELAY_BETWEEN_CALLS_MS = 1000; // Base 1 second delay
 const RANDOM_DELAY_MAX_MS = 500; // Random extra delay up to 500ms
-const ENTRIES_WITHIN_SECONDS = 604800; // 7 days in seconds
+const USER_AGENT = 'mehrwert (+https://github.com/Josh-zjx/mehrwert)';
 
 /**
  * Global request queue for rate limiting
@@ -49,7 +55,6 @@ class UniversalisRequestQueue {
    * Process the request queue respecting rate limits
    */
   async processQueue() {
-    // If already processing or queue is empty, return
     if (this.processing || this.queue.length === 0) {
       return;
     }
@@ -60,17 +65,14 @@ class UniversalisRequestQueue {
       const { requestFn, resolve, reject } = this.queue.shift();
 
       try {
-        // Calculate delay needed since last request
         const now = Date.now();
         const timeSinceLastRequest = now - this.lastRequestTime;
         const requiredDelay = this.getRandomizedDelay();
 
         if (timeSinceLastRequest < requiredDelay) {
-          const waitTime = requiredDelay - timeSinceLastRequest;
-          await delay(waitTime);
+          await delay(requiredDelay - timeSinceLastRequest);
         }
 
-        // Execute the request
         const result = await requestFn();
         this.lastRequestTime = Date.now();
         resolve(result);
@@ -84,19 +86,16 @@ class UniversalisRequestQueue {
   }
 }
 
-// Global request queue instance
 const requestQueue = new UniversalisRequestQueue();
 
 /**
- * Fetch market data for items from Universalis API
- * Uses global rate limiting queue
- * @param {number[]} itemIDs - Array of item IDs (max 5)
- * @param {string} worldName - World/data center name (default: 'China')
- * @param {number} listingsLimit - Limit for listings per item
- * @param {number} entriesLimit - Limit for recent history entries per item
- * @returns {Promise<Object>} Market data response
+ * Fetch aggregated market data for items from Universalis.
+ * @param {number[]} itemIDs - Array of item IDs (max 100)
+ * @param {string} worldName - World or data center name. Use a data center: a
+ *   region (China, North-America, ...) spans too many worlds and times out.
+ * @returns {Promise<Object>} Aggregated response with a `results` array
  */
-async function fetchMarketData(itemIDs, worldName = 'China', listingsLimit = 5, entriesLimit = 20) {
+async function fetchAggregated(itemIDs, worldName) {
   if (!itemIDs || itemIDs.length === 0) {
     throw new Error('itemIDs array cannot be empty');
   }
@@ -105,29 +104,38 @@ async function fetchMarketData(itemIDs, worldName = 'China', listingsLimit = 5, 
     throw new Error(`Cannot fetch more than ${MAX_ITEMS_PER_CALL} items in a single API call`);
   }
 
-  // Build URL
-  const itemIDsString = itemIDs.join(',');
-  let url = `${UNIVERSALIS_API_BASE}/${worldName}/${itemIDsString}`;
+  const url = `${UNIVERSALIS_API_BASE}/aggregated/${encodeURIComponent(worldName)}/${itemIDs.join(',')}`;
 
-  // Add query parameters
-  const params = {};
-  if (listingsLimit !== null && listingsLimit !== undefined) {
-    params.listings = listingsLimit;
-  }
-  if (entriesLimit !== null && entriesLimit !== undefined) {
-    params.entries = entriesLimit;
-  }
-  // Always include entriesWithin to limit history to last 7 days
-  params.entriesWithin = ENTRIES_WITHIN_SECONDS;
-
-  url += buildQueryString(params);
-
-  // Enqueue the request through global rate limiter
   return requestQueue.enqueue(async () => {
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
 
     if (!response.ok) {
-      throw new Error(`Universalis API error: ${response.status} ${response.statusText}`);
+      const error = new Error(`Universalis API error: ${response.status} ${response.statusText}`);
+      // Callers use this to decide whether a failure is worth retrying
+      error.status = response.status;
+      throw error;
+    }
+
+    return await response.json();
+  });
+}
+
+/**
+ * Fetch the list of data centers Universalis knows about.
+ * This is the authoritative answer to "which data centers are supported" - we never
+ * hardcode the game's topology, so new data centers appear without a code change.
+ * @returns {Promise<Array<{name: string, region: string, worlds: number[]}>>}
+ */
+async function fetchDataCenters() {
+  return requestQueue.enqueue(async () => {
+    const response = await fetch(`${UNIVERSALIS_API_BASE}/data-centers`, {
+      headers: { 'User-Agent': USER_AGENT },
+    });
+
+    if (!response.ok) {
+      const error = new Error(`Universalis API error: ${response.status} ${response.statusText}`);
+      error.status = response.status;
+      throw error;
     }
 
     return await response.json();
@@ -135,6 +143,7 @@ async function fetchMarketData(itemIDs, worldName = 'China', listingsLimit = 5, 
 }
 
 export {
-  fetchMarketData,
+  fetchAggregated,
+  fetchDataCenters,
   MAX_ITEMS_PER_CALL,
 };

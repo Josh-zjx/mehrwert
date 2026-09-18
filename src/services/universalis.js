@@ -12,12 +12,9 @@
 import { logApiCallStart, logApiCallSuccess, logApiCallError, logDelay, logBatchProgress } from './logger.js';
 import { delay, buildQueryString } from '../utils/common.js';
 
-// API base URL - Universalis API already supports CORS (access-control-allow-origin: *)
-// In development, can use proxy (/api/v2) or direct API (https://universalis.app/api/v2)
-// In production, use direct API
-const UNIVERSALIS_API_BASE = import.meta.env.DEV 
-  ? '/api/v2'  // Use proxy in development (optional - API already supports CORS)
-  : 'https://universalis.app/api/v2';  // Direct API call in production
+// Universalis serves access-control-allow-origin: *, so the browser can call it
+// directly in both dev and production - no proxy needed.
+const UNIVERSALIS_API_BASE = 'https://universalis.app/api/v2';
 
 /**
  * Fetches market data for one or more items
@@ -26,15 +23,17 @@ const UNIVERSALIS_API_BASE = import.meta.env.DEV
  * @param {string|null} worldName - Optional world name (e.g., "Materia", "Chaos"). If null, fetches from all worlds
  * @param {number|null} listingsLimit - Optional limit for number of listings to return per item
  * @param {number|null} entriesLimit - Optional limit for number of recent history entries to return per item
+ * @param {Object|null} batchInfo - Optional batch position, used for logging only
+ * @param {number|null} entriesWithin - Optional history window in seconds (e.g. 604800 for 7 days)
  * @returns {Promise<Object>} Market data response from Universalis API
  */
-async function fetchMarketData(itemIDs, worldName = null, listingsLimit = null, entriesLimit = null, batchInfo = null) {
+async function fetchMarketData(itemIDs, worldName = null, listingsLimit = null, entriesLimit = null, batchInfo = null, entriesWithin = null) {
   if (!itemIDs || itemIDs.length === 0) {
     throw new Error('itemIDs array cannot be empty');
   }
 
-  if (itemIDs.length > 20) {
-    throw new Error('Cannot fetch more than 20 items in a single API call');
+  if (itemIDs.length > 100) {
+    throw new Error('Cannot fetch more than 100 items in a single API call');
   }
 
   // Validate itemIDs are numbers
@@ -56,6 +55,9 @@ async function fetchMarketData(itemIDs, worldName = null, listingsLimit = null, 
   }
   if (entriesLimit !== null && entriesLimit !== undefined) {
     params.entries = entriesLimit;
+  }
+  if (entriesWithin !== null && entriesWithin !== undefined) {
+    params.entriesWithin = entriesWithin;
   }
   
   url += buildQueryString(params);
@@ -210,6 +212,27 @@ function parseItemData(itemData) {
 }
 
 /**
+ * Parses one raw API response, whether it is a single item or a multi-item batch
+ * @param {Object} batchData - Raw response from fetchMarketData
+ * @returns {{items: Object, itemIDs: number[]}} Parsed items keyed by item ID
+ */
+function parseBatch(batchData) {
+  if (batchData.itemID !== undefined) {
+    return { items: { [batchData.itemID]: parseItemData(batchData) }, itemIDs: [batchData.itemID] };
+  }
+
+  if (batchData.items && typeof batchData.items === 'object') {
+    const items = {};
+    for (const [itemID, itemData] of Object.entries(batchData.items)) {
+      items[itemID] = parseItemData(itemData);
+    }
+    return { items, itemIDs: batchData.itemIDs || [] };
+  }
+
+  return { items: {}, itemIDs: [] };
+}
+
+/**
  * Fetches and parses market data for one or more items
  * 
  * @param {number[]} itemIDs - Array of item IDs to fetch (will be batched if > 20)
@@ -217,13 +240,19 @@ function parseItemData(itemData) {
  * @param {number|null} listingsLimit - Optional limit for number of listings to return per item
  * @param {number|null} entriesLimit - Optional limit for number of recent history entries to return per item
  * @param {Function|null} progressCallback - Optional callback function(progress) called with progress 0-100
+ * @param {number|null} entriesWithin - Optional history window in seconds (e.g. 604800 for 7 days)
+ * @param {Function|null} onBatch - Optional callback(itemsById) fired as each batch
+ *   lands, so callers can render partial results instead of waiting for all of them
  * @returns {Promise<Object>} Parsed market data
  * @returns {Promise<Object[]>} If single item, returns parsed item data object
  * @returns {Promise<Object>} If multiple items, returns object with itemIDs array and items object keyed by itemID
  */
-async function getItemMarketData(itemIDs, worldName = null, listingsLimit = null, entriesLimit = null, progressCallback = null) {
-  const MAX_ITEMS_PER_BATCH = 20; // Maximum items per API call
-  const DELAY_BETWEEN_CALLS_MS = 1000; // 200ms delay between API calls
+async function getItemMarketData(itemIDs, worldName = null, listingsLimit = null, entriesLimit = null, progressCallback = null, entriesWithin = null, onBatch = null) {
+  // Universalis allows 100 item IDs per request. What actually governs latency is
+  // history depth, not item count: with entries=0 a 100-item call returns in ~2s,
+  // while the same call with entries=20 times out past ~10 items.
+  const MAX_ITEMS_PER_BATCH = 100;
+  const DELAY_BETWEEN_CALLS_MS = 1000;
   
   // Batch requests if more than MAX_ITEMS_PER_BATCH items
   if (itemIDs.length > MAX_ITEMS_PER_BATCH) {
@@ -248,8 +277,12 @@ async function getItemMarketData(itemIDs, worldName = null, listingsLimit = null
       const batchData = await fetchMarketData(batch, worldName, listingsLimit, entriesLimit, {
         batchNumber: i + 1,
         totalBatches: totalBatches,
-      });
+      }, entriesWithin);
       batchResults.push(batchData);
+
+      if (onBatch) {
+        onBatch(parseBatch(batchData).items);
+      }
       
       // Update progress
       if (progressCallback) {
@@ -266,22 +299,11 @@ async function getItemMarketData(itemIDs, worldName = null, listingsLimit = null
     // Combine all batch results
     const allItems = {};
     const allItemIDs = [];
-    
+
     for (const batchData of batchResults) {
-      if (batchData.itemID !== undefined) {
-        // Single item response
-        const parsed = parseItemData(batchData);
-        allItems[batchData.itemID] = parsed;
-        allItemIDs.push(batchData.itemID);
-      } else if (batchData.items && typeof batchData.items === 'object') {
-        // Multiple items response
-        if (batchData.itemIDs) {
-          allItemIDs.push(...batchData.itemIDs);
-        }
-        for (const [itemID, itemData] of Object.entries(batchData.items)) {
-          allItems[itemID] = parseItemData(itemData);
-        }
-      }
+      const { items, itemIDs: ids } = parseBatch(batchData);
+      Object.assign(allItems, items);
+      allItemIDs.push(...ids);
     }
     
     return {
@@ -295,32 +317,37 @@ async function getItemMarketData(itemIDs, worldName = null, listingsLimit = null
     progressCallback(50);
   }
   
-  const data = await fetchMarketData(itemIDs, worldName, listingsLimit, entriesLimit);
-  
+  const data = await fetchMarketData(itemIDs, worldName, listingsLimit, entriesLimit, null, entriesWithin);
+
   if (progressCallback) {
     progressCallback(100);
   }
-  
+
+  const isSingleItem = data.itemID !== undefined;
+  const isMultiItem = data.items && typeof data.items === 'object';
+
+  if (!isSingleItem && !isMultiItem) {
+    throw new Error('Unexpected response format from Universalis API');
+  }
+
+  // A single request is still one batch: callers that render from onBatch (rather
+  // than the return value) must see it too, or a category that fits in one request
+  // never gets any market data while a larger one does.
+  const parsed = parseBatch(data);
+  if (onBatch) {
+    onBatch(parsed.items);
+  }
+
   // Handle single item response
-  if (data.itemID !== undefined) {
-    return parseItemData(data);
+  if (isSingleItem) {
+    return parsed.items[data.itemID];
   }
-  
+
   // Handle multiple items response
-  if (data.items && typeof data.items === 'object') {
-    const parsedItems = {};
-    
-    for (const [itemID, itemData] of Object.entries(data.items)) {
-      parsedItems[itemID] = parseItemData(itemData);
-    }
-    
-    return {
-      itemIDs: data.itemIDs || [],
-      items: parsedItems,
-    };
-  }
-  
-  throw new Error('Unexpected response format from Universalis API');
+  return {
+    itemIDs: parsed.itemIDs,
+    items: parsed.items,
+  };
 }
 
 /**

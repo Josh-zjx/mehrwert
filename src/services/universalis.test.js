@@ -511,6 +511,49 @@ describe('getItemMarketData', () => {
     expect(result.error).toBe('No market data available for this item');
   });
 
+  it('fires onBatch for a request that fits in a single batch', async () => {
+    // The hot category (<= 100 items) is one request. The UI renders from onBatch,
+    // so a single request must report its batch just like a multi-request fetch.
+    const mockResponse = {
+      itemIDs: [32833, 32834],
+      items: {
+        '32833': { itemID: 32833, hasData: true, listings: [], currentAveragePrice: 10000 },
+        '32834': { itemID: 32834, hasData: true, listings: [], currentAveragePrice: 15000 },
+      },
+    };
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    });
+
+    const onBatch = vi.fn();
+    const result = await getItemMarketData([32833, 32834], 'Aether', 5, 0, null, null, onBatch);
+
+    expect(onBatch).toHaveBeenCalledTimes(1);
+    const batch = onBatch.mock.calls[0][0];
+    expect(Object.keys(batch)).toEqual(['32833', '32834']);
+    // onBatch receives the same parsed shape as the return value
+    expect(batch['32833'].prices.currentAverage).toBe(10000);
+    expect(batch).toEqual(result.items);
+  });
+
+  it('fires onBatch for a single-item response', async () => {
+    const mockResponse = { itemID: 32833, hasData: true, listings: [], currentAveragePrice: 10000 };
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    });
+
+    const onBatch = vi.fn();
+    const result = await getItemMarketData([32833], 'Aether', 5, 0, null, null, onBatch);
+
+    expect(onBatch).toHaveBeenCalledTimes(1);
+    expect(onBatch.mock.calls[0][0]).toEqual({ '32833': result });
+    expect(result.itemID).toBe(32833);
+  });
+
   it('should throw error for unexpected response format', async () => {
     const mockResponse = {
       unexpected: 'format',
