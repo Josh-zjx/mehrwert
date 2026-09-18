@@ -4,6 +4,7 @@ import { fetchIndex, fetchDataCenters } from '../services/backendApi.js';
 import { fetchMarketDataForIds, getItemListMap } from '../services/itemMarketService.js';
 import { formatDate, formatNumber, formatRelativeTime } from '../utils/format.js';
 import ClassificationSection from './ClassificationSection.vue';
+import { useTheme } from '../composables/useTheme.js';
 
 const CLASSIFICATIONS = ['hot', 'mild', 'cold'];
 const LABELS = { hot: 'Hot', mild: 'Mild', cold: 'Cold' };
@@ -11,6 +12,8 @@ const LABELS = { hot: 'Hot', mild: 'Mild', cold: 'Cold' };
 // Item names/metadata are bundled with the frontend - the backend only tells us
 // how active each item is, and the market data comes straight from Universalis.
 const itemsById = getItemListMap();
+
+const { isDark, toggleTheme } = useTheme();
 
 const catalog = ref(null);
 const region = ref(null);
@@ -302,7 +305,23 @@ onUnmounted(() => {
         </p>
       </div>
 
-      <div v-if="regions.length > 0" class="controls">
+      <div class="controls">
+        <button
+          type="button"
+          class="theme"
+          :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+          :aria-pressed="isDark"
+          @click="toggleTheme"
+        >
+          <svg v-if="isDark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+          </svg>
+          <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+          </svg>
+        </button>
+        <template v-if="regions.length > 0">
         <label class="field">
           <span class="field-label">Region</span>
           <select class="select" :value="region" @change="selectRegion($event.target.value)">
@@ -324,6 +343,7 @@ onUnmounted(() => {
           </svg>
           {{ loading ? 'Loading…' : 'Refresh' }}
         </button>
+        </template>
       </div>
     </header>
 
@@ -437,6 +457,25 @@ onUnmounted(() => {
   border-radius: var(--radius-control);
   appearance: none;
   cursor: pointer;
+}
+
+.theme {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 2px solid var(--hairline);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.theme:hover {
+  color: var(--ink);
+  border-color: var(--line);
 }
 
 .refresh {
@@ -557,8 +596,13 @@ onUnmounted(() => {
   }
 
   .refresh {
-    grid-column: 1 / -1;
+    order: 1;
     justify-content: center;
+  }
+
+  .theme {
+    order: 2;
+    justify-self: end;
   }
 
   .summary {
