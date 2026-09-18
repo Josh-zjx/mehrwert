@@ -120,7 +120,10 @@ describe('ItemMarketDisplay', () => {
 
     expect(html).toContain('西兰花'); // item name comes from the bundled list
     expect(html).toContain('1,500'); // velocity from the index, not from market data
-    expect(html).toContain('120 gil');
+    expect(el.textContent).toContain('120 gil'); // the unit is set in its own span
+    // Expected profit: the item's largest quantity (50) at the cheapest listing (120)
+    expect(el.textContent).toContain('Expected profit');
+    expect(el.textContent).toContain('6,000 gil');
 
     // Listings stay collapsed until the user opens them
     expect(html).toContain('Listings (1)');
@@ -129,6 +132,26 @@ describe('ItemMarketDisplay', () => {
     // Only the hot card was fetched; mild/cold stay collapsed and unfetched
     expect(fetchMarketDataForIds).toHaveBeenCalledTimes(1);
     expect(fetchMarketDataForIds.mock.calls[0][0]).toEqual([HOT_ID]);
+    app.unmount();
+  });
+
+  it('orders hot items by expected profit, not by velocity', async () => {
+    // Both items are hot; the slower seller has the dearer listing
+    fetchIndex.mockImplementation(async (dc) => ({ ...indexFor(dc), hotLimit: 2 }));
+    fetchMarketDataForIds.mockImplementation(async (ids, opts) => {
+      const items = Object.fromEntries(ids.map(id => [String(id), marketDataFor(id)]));
+      items[String(MILD_ID)].listings[0].pricePerUnit = 500;
+      opts?.onBatch?.(items);
+      return items;
+    });
+
+    const { el, app } = await mount();
+    const text = el.textContent;
+
+    // 50 × 500 = 25,000 beats 50 × 120 = 6,000, so the slower item comes first
+    expect(text.indexOf('香风月桂叶')).toBeLessThan(text.indexOf('西兰花'));
+    expect(text).toContain('25,000 gil');
+    expect(fetchMarketDataForIds).toHaveBeenCalledTimes(1);
     app.unmount();
   });
 

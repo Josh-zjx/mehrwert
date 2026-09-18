@@ -1,53 +1,40 @@
-/* color palette from <https://github.com/vuejs/theme> */
+/* Design tokens. A warm paper ground, one ink, a rounded sans, and three class hues
+   that share chroma and lightness so Hot / Mild / Cold read as siblings, not alerts. */
+/* One definition per token: light-dark() picks the value from the element's
+   color-scheme, which is the OS preference until the user picks a theme. */
 :root {
-  --vt-c-white: #ffffff;
-  --vt-c-white-soft: #f8f8f8;
-  --vt-c-white-mute: #f2f2f2;
+  --ground: light-dark(#f5f3ee, #171614);
+  --surface: light-dark(#ffffff, #201f1c);
+  --ink: light-dark(#1b1a17, #f0ede6);
+  --ink-inverse: light-dark(#f5f3ee, #171614);
+  --muted: light-dark(#5f5b52, #a8a396);
+  --faint: light-dark(#9a9488, #7d786d);
+  --hairline: light-dark(#e4e0d6, #2e2c27);
+  --hairline-soft: light-dark(#ece8df, #2a2824);
+  --line: light-dark(#d9d4c8, #3a372f);
+  --skeleton: light-dark(#ece8df, #2e2c27);
 
-  --vt-c-black: #181818;
-  --vt-c-black-soft: #222222;
-  --vt-c-black-mute: #282828;
+  --hot: light-dark(#b5320f, #f0855f);
+  --hot-tint: light-dark(#fbe9e1, #3a1f16);
+  --mild: light-dark(#8a5a00, #e0a83a);
+  --mild-tint: light-dark(#fbefd2, #35290f);
+  --cold: light-dark(#1f4f9e, #7fa8e8);
+  --cold-tint: light-dark(#e3ecf9, #182842);
+  --danger: var(--hot);
+  --danger-tint: var(--hot-tint);
 
-  --vt-c-indigo: #2c3e50;
+  --font-body:
+    Nunito, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-display: var(--font-body);
 
-  --vt-c-divider-light-1: rgba(60, 60, 60, 0.29);
-  --vt-c-divider-light-2: rgba(60, 60, 60, 0.12);
-  --vt-c-divider-dark-1: rgba(84, 84, 84, 0.65);
-  --vt-c-divider-dark-2: rgba(84, 84, 84, 0.48);
-
-  --vt-c-text-light-1: var(--vt-c-indigo);
-  --vt-c-text-light-2: rgba(60, 60, 60, 0.66);
-  --vt-c-text-dark-1: var(--vt-c-white);
-  --vt-c-text-dark-2: rgba(235, 235, 235, 0.64);
-}
-
-/* semantic color variables for this project */
-:root {
-  --color-background: var(--vt-c-white);
-  --color-background-soft: var(--vt-c-white-soft);
-  --color-background-mute: var(--vt-c-white-mute);
-
-  --color-border: var(--vt-c-divider-light-2);
-  --color-border-hover: var(--vt-c-divider-light-1);
-
-  --color-heading: var(--vt-c-text-light-1);
-  --color-text: var(--vt-c-text-light-1);
-
-  --section-gap: 160px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-background: var(--vt-c-black);
-    --color-background-soft: var(--vt-c-black-soft);
-    --color-background-mute: var(--vt-c-black-mute);
-
-    --color-border: var(--vt-c-divider-dark-2);
-    --color-border-hover: var(--vt-c-divider-dark-1);
-
-    --color-heading: var(--vt-c-text-dark-1);
-    --color-text: var(--vt-c-text-dark-2);
-  }
+  --shadow-card:
+    0 1px 2px light-dark(rgba(27, 26, 23, 0.04), rgba(0, 0, 0, 0.3)),
+    0 8px 24px -10px light-dark(rgba(27, 26, 23, 0.16), rgba(0, 0, 0, 0.5));
+  --radius-card: 22px;
+  --radius-tile: 20px;
+  --radius-control: 999px;
+  --page-width: 1440px;
+  --page-gutter: clamp(16px, 4vw, 56px);
 }
 
 *,
@@ -55,32 +42,41 @@
 *::after {
   box-sizing: border-box;
   margin: 0;
-  font-weight: normal;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 body {
   min-height: 100vh;
-  color: var(--color-text);
-  background: var(--color-background);
-  transition:
-    color 0.5s,
-    background-color 0.5s;
-  line-height: 1.6;
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    'Fira Sans',
-    'Droid Sans',
-    'Helvetica Neue',
-    sans-serif;
+  color: var(--ink);
+  background: var(--ground);
+  font-family: var(--font-body);
   font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
